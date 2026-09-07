@@ -1,7 +1,8 @@
 {
   "name": "ztoast",
-  "version": "0.1.6",
-  "description": "A modern, zero-runtime-dependency toast notification library for React with progress bars, popover themes, and CSS sanitization.",
+  "version": "0.1.7",
+  "description": "Smoking hot, zero-dependency React notifications with countdown progress bars and promise tracking.",
+  "homepage": "https://ztoast.onrender.com",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -49,14 +50,14 @@
     "vitest": "^3.2.0"
   },
   "keywords": [
-    "react",
     "toast",
-    "notification",
-    "toaster",
+    "react-toast",
+    "react",
+    "notifications",
     "alert",
-    "ztoast",
-    "progress-bar",
-    "promise-toast"
+    "react-hot-toast",
+    "zero-dependency",
+    "ztoast"
   ],
   "license": "MIT"
 }

@@ -2,6 +2,8 @@
 
 A modern, lightweight, zero-runtime-dependency toast notification library for React.
 
+**[Live Documentation & Interactive Demo](https://ztoast.onrender.com)**
+
 Built around a sleek dark popover aesthetic, a countdown progress bar that stays synchronized with a pause-on-hover timer, first-class promise lifecycle handling, and a strict allowlist sanitizer on every raw CSS value a consumer can pass in.
 
 - **No runtime dependencies.** `react` and `react-dom` are peer dependencies; nothing else is shipped.
