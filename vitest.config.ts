@@ -1,10 +1,10 @@
 import { defineConfig } from "vitest/config";
 
-// test configuration with jsdom environment for react rendering tests
+// jsdom environment, because every test renders react into a dom
 export default defineConfig({
-  root: ".",
   test: {
     environment: "jsdom",
     globals: true,
+    include: ["tests/**/*.test.{ts,tsx}"],
   },
 });

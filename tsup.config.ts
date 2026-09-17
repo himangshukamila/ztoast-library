@@ -1,8 +1,8 @@
 import { defineConfig } from "tsup";
 
-// configuration for generating dual esm and cjs build with typescript declarations
+// dual esm + cjs build with typescript declarations
 export default defineConfig({
-  entry: ["index.ts"],
+  entry: ["src/index.ts"],
   format: ["esm", "cjs"],
   dts: true,
   clean: true,
@@ -16,8 +16,8 @@ export default defineConfig({
   // react/react-dom are peer dependencies and must never be inlined into the
   // bundle: a second copy of react in a consumer app breaks hooks and context
   external: ["react", "react-dom", "react/jsx-runtime"],
-  // the library is built on hooks, context and portals, so every entry point is
-  // a client component. without this banner, importing <Toaster /> from a
-  // next.js app-router server component fails at build time.
+  // the library is built on hooks and portals, so every entry point is a client
+  // component. without this banner, importing <Toaster /> from a next.js
+  // app-router server component fails at build time.
   banner: { js: '"use client";' },
 });
