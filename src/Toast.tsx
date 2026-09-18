@@ -90,6 +90,11 @@ const MOTION_DEFAULTS: ResolvedMotion = {
 // first and the gap it leaves behind closes after it
 const COLLAPSE_DELAY_RATIO = 0.35;
 
+// how long the stack takes to open up a slot on enter, independent of the
+// card's own motion. the card does not wait for it - it is already in place -
+// so this only governs how quickly the toasts around it make room.
+const ROW_MS = 260;
+
 let reducedMotion: boolean | null = null;
 
 function prefersReducedMotion(): boolean {
@@ -200,6 +205,10 @@ export function Toast({ record, settings, placement }: ToastProps) {
     ? Math.round(motion.exit * COLLAPSE_DELAY_RATIO)
     : 0;
 
+  // the stack opens its slot faster than the card eases in. the exit is
+  // unchanged: there the row and the card move together.
+  const rowMs = visible ? Math.min(motion.enter, ROW_MS) : phaseMs;
+
   // flip to the visible style one painted frame after mount, so the browser has
   // an initial state to transition away from. two frames, because a single one
   // is occasionally coalesced with the mounting paint.
@@ -222,8 +231,9 @@ export function Toast({ record, settings, placement }: ToastProps) {
     };
   }, []);
 
-  // the collapsing wrapper has to clip while it animates, which would also clip
-  // the card's shadow. once the enter animation is done it stops clipping.
+  // once the card's own motion is over it no longer needs a compositing layer
+  // or a filter. this waits for the card, not the row: dropping them early
+  // would tear the layer down mid-animation.
   useEffect(() => {
     if (!entered || leaving) return;
     const timer = setTimeout(() => setSettled(true), motion.enter);
@@ -307,10 +317,23 @@ export function Toast({ record, settings, placement }: ToastProps) {
 
   const width = len(settings.width);
 
+  // only the exit needs masking. on the way in the card already sits at its
+  // final spot and simply overflows the row that is still growing behind it,
+  // into the empty space the stack is about to occupy - so nothing has to clip,
+  // and the card carries its shadow from the very first frame.
+  //
+  // this matters because a clip box sized to the card slices the shadow off
+  // square on three sides: the default shadow reaches 8px past the left and
+  // right edges and 26px past the bottom one.
+  const clipped = leaving;
+
   const cardTransition = [
     `transform ${phaseMs}ms ${phaseEase}`,
     `opacity ${Math.round(phaseMs * 0.75)}ms ${phaseEase}`,
     `filter ${phaseMs}ms ${phaseEase}`,
+    // the shadow only starts fading once the clip lifts, so its length follows
+    // the row rather than the card
+    `box-shadow ${Math.round(rowMs * 0.45)}ms ${phaseEase}`,
   ].join(", ");
 
   const cardStyle: CSSProperties = {
@@ -335,7 +358,7 @@ export function Toast({ record, settings, placement }: ToastProps) {
     textAlign: "left",
     borderRadius: len(settings.radius) ?? 14,
     border: css(settings.border) ?? palette.border,
-    boxShadow: css(settings.shadow) ?? palette.shadow,
+    boxShadow: clipped ? "none" : (css(settings.shadow) ?? palette.shadow),
     // keeps the progress bar inside the rounded corners
     overflow: "hidden",
     pointerEvents: "auto",
@@ -363,13 +386,20 @@ export function Toast({ record, settings, placement }: ToastProps) {
         // 0fr -> 1fr animates the row height without ever measuring the dom,
         // which is what makes the stack settle smoothly when one toast leaves
         gridTemplateRows: visible ? "1fr" : "0fr",
-        transition: `grid-template-rows ${phaseMs}ms ${phaseEase} ${collapseDelay}ms`,
+        transition: `grid-template-rows ${rowMs}ms ${phaseEase} ${collapseDelay}ms`,
       }}
     >
       <div
         style={{
           minHeight: 0,
-          overflow: settled && !leaving ? "visible" : "hidden",
+          // while the row is still growing the card is taller than it. flex
+          // alignment decides which way it overflows, and it has to be away
+          // from the anchor - into the space the stack is opening up - so the
+          // card never covers a toast that is already on screen.
+          display: "flex",
+          alignItems:
+            placement.direction === "up" ? "flex-end" : "flex-start",
+          overflow: clipped ? "hidden" : "visible",
         }}
       >
         {/* the gap between toasts lives inside the collapsing box, so it

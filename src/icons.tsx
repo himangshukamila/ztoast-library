@@ -58,15 +58,24 @@ function variantIcon(variant: ToastVariant, color: string): ReactNode {
     case "loading":
       return (
         <svg {...strokeProps(color)}>
-          <path d="M12 3a9 9 0 1 0 9 9" opacity="0.9" />
-          <animateTransform
-            attributeName="transform"
-            type="rotate"
-            from="0 12 12"
-            to="360 12 12"
-            dur="0.9s"
-            repeatCount="indefinite"
-          />
+          {/* a faint full ring, so the moving arc reads as a quarter of a
+              circle travelling rather than a ring with a gap in it */}
+          <circle cx="12" cy="12" r="9" opacity="0.25" />
+          {/* the rotation centre is in viewBox units, so the spinning element
+              has to be inside the viewBox. on the <svg> itself the transform
+              would resolve against the parent's css pixels - 18 of them, not
+              24 - and pivot 3px off centre, orbiting instead of spinning */}
+          <g>
+            <path d="M12 3a9 9 0 0 1 9 9" />
+            <animateTransform
+              attributeName="transform"
+              type="rotate"
+              from="0 12 12"
+              to="360 12 12"
+              dur="0.8s"
+              repeatCount="indefinite"
+            />
+          </g>
         </svg>
       );
     default:
@@ -98,7 +107,11 @@ export function renderIcon(
         alignItems: "center",
         justifyContent: "center",
         flexShrink: 0,
-        lineHeight: 0,
+        // an svg is a flex item here and needs no line box, but a string icon
+        // ("🎉") is text: with line-height 0 its glyph gets a zero height box
+        // and straddles the top edge of the card whenever the card top-aligns
+        // its icon, which it does as soon as there is a description
+        lineHeight: 1,
         color,
         fontSize: SIZE,
       }}

@@ -98,6 +98,60 @@ describe("the toast api", () => {
     expect(screen.getByTestId("star")).toBeTruthy();
   });
 
+  it("gives a text icon a line box so it sits on the title line", () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.success("saved", "🎉", { description: "a description top-aligns" });
+    });
+
+    const wrapper = screen.getByText("🎉");
+    const cardEl = screen.getByText("saved").closest("[data-ztoast]") as HTMLElement;
+
+    // the card top-aligns its icon once there is a description, so a glyph with
+    // a zero height line box would ride up over the card's top edge
+    expect(cardEl.style.alignItems).toBe("flex-start");
+    expect(wrapper.style.lineHeight).toBe("1");
+    expect(wrapper.style.fontSize).toBe("18px");
+  });
+
+  it("spins the loading icon about its own centre", () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.loading("syncing records");
+    });
+
+    const svg = screen
+      .getByText("syncing records")
+      .closest("[data-ztoast]")
+      ?.getElementsByTagName("svg")[0] as SVGSVGElement;
+    const spin = svg.getElementsByTagName("animateTransform")[0];
+
+    // the centre is given in viewBox units, so the animated element has to be
+    // inside the viewBox. on the <svg> itself the transform resolves against
+    // the parent's css pixels and the icon orbits instead of spinning.
+    expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(spin.getAttribute("to")).toBe("360 12 12");
+    expect(spin.parentElement?.tagName).toBe("g");
+
+    // a quarter arc over a faint full ring, rather than a 270 degree arc that
+    // looks like a closed ring with a gap orbiting it
+    const arc = svg.getElementsByTagName("path")[0];
+    expect(arc.getAttribute("d")).toBe("M12 3a9 9 0 0 1 9 9");
+    expect(svg.getElementsByTagName("circle")).toHaveLength(1);
+  });
+
+  it("centres the icon when there is no description", () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.success("just a line");
+    });
+
+    expect(card().style.alignItems).toBe("center");
+  });
+
   it("renders an emoji icon and can turn the icon off", () => {
     render(<Toaster />);
 
@@ -260,6 +314,14 @@ describe("the toast api", () => {
 
     expect(screen.queryByText("saving file")).toBeNull();
     expect(screen.getByText("saved report.pdf")).toBeTruthy();
+
+    // the spinner is gone with it: no animation is left running on the card
+    // that replaced the loading toast in place
+    const settled = screen
+      .getByText("saved report.pdf")
+      .closest("[data-ztoast]") as HTMLElement;
+    expect(settled.getElementsByTagName("animateTransform")).toHaveLength(0);
+    expect(settled.getAttribute("data-variant")).toBe("success");
   });
 
   it("tracks a promise through to failure and still honours the duration", async () => {
@@ -337,6 +399,92 @@ describe("styling", () => {
     expect(fitted.style.width).toBe("");
     expect(fitted.style.maxWidth).toBe("min(92vw, 440px)");
     expect(fitted.style.minWidth).toBe("240px");
+  });
+
+  it("paints its shadow on the very first frame", () => {
+    render(<Toaster />);
+
+    act(() => {
+      // a deliberately long enter: the shadow must not wait for any part of it
+      toast.show("shadowed", {
+        shadow: "0 10px 20px rgb(0, 0, 0)",
+        motion: { enter: 1500 },
+      });
+    });
+
+    // synchronously, before a single animation frame has run
+    expect(card().style.boxShadow).toBe("0 10px 20px rgb(0, 0, 0)");
+    // nothing is clipping it, so none of it is sliced off
+    expect(card().parentElement?.parentElement?.style.overflow).toBe("visible");
+    // it is invisible at this point only because the whole card is
+    expect(card().style.opacity).toBe("0");
+  });
+
+  it("keeps the shadow through the enter, whatever the easing", async () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.show("linear", {
+        shadow: "0 10px 20px rgb(0, 0, 0)",
+        motion: { enter: 800, easing: "linear" },
+      });
+    });
+
+    const grid = () => card().parentElement?.parentElement?.parentElement;
+
+    await sleep(200);
+
+    // mid-enter: the row is still opening the slot, and the shadow is already
+    // fully painted rather than waiting for the row or the card
+    expect(card().style.boxShadow).toBe("0 10px 20px rgb(0, 0, 0)");
+    expect(grid()?.style.transition).toBe(
+      "grid-template-rows 260ms linear 0ms"
+    );
+    expect(card().style.transition).toContain("transform 800ms");
+  });
+
+  it("overflows away from the anchor while the slot opens", () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.show("downwards", { id: "down", position: "top-right" });
+      toast.show("upwards", { id: "up", position: "bottom-right" });
+    });
+
+    const clipBox = (text: string) =>
+      screen.getByText(text).closest("[data-ztoast]")?.parentElement
+        ?.parentElement as HTMLElement;
+
+    // a top stack grows downwards, so the card overflows downwards; a bottom
+    // stack grows upwards, so it must overflow upwards instead of covering the
+    // toast already sitting below it
+    expect(clipBox("downwards").style.alignItems).toBe("flex-start");
+    expect(clipBox("upwards").style.alignItems).toBe("flex-end");
+  });
+
+  it("drops the shadow again while the toast animates out", async () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.show("leaving", {
+        id: "leaving",
+        duration: Infinity,
+        shadow: "0 10px 20px rgb(0, 0, 0)",
+        motion: { enter: 30 },
+      });
+    });
+
+    await waitFor(
+      () => expect(card().style.boxShadow).toBe("0 10px 20px rgb(0, 0, 0)"),
+      { timeout: 2000 }
+    );
+
+    act(() => {
+      toast.dismiss("leaving");
+    });
+
+    // clipping resumes for the collapse, so the shadow has to go with it
+    expect(card().style.boxShadow).toBe("none");
   });
 
   it("accepts a gradient as the background", () => {

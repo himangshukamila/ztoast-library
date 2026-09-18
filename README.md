@@ -471,6 +471,8 @@ Details that are useful when something surprises you.
 
 **Motion.** Each card sits in a wrapper that animates `grid-template-rows` from `0fr` to `1fr`, so heights are never measured in JavaScript and the stack settles smoothly when a toast leaves. The gap between toasts lives inside that collapsing box, so it closes with the toast instead of leaving a hole. Where `fr` interpolation is unsupported the height snaps while the fade, slide and scale still play.
 
+**Nothing clips on the way in.** A clip box sized to the card would slice its shadow off square on three sides — the default shadow reaches 8px past the left and right edges and 26px past the bottom one. So the enter does not clip at all: the card is placed at its final position immediately and simply overflows the row that is still opening up behind it, away from the anchor, into the space the stack is about to fill. It therefore carries its shadow from the first frame and never covers a toast that is already on screen. The exit is the only phase that masks, because there the card really does have to shrink with its row — so the shadow is dropped for those few hundred milliseconds, while the toast is fading out anyway.
+
 **Timing.** The countdown starts on the first painted frame, not on mount, so the bar and the toast stay in step. It lives in the card, the only place that knows whether the pointer or keyboard is resting on it.
 
 **Dismissal.** Dismissing marks the toast as leaving; it is removed from state once its exit animation has finished. Re-adding the same `id` cancels a pending removal, so `dismiss(id)` followed immediately by another call with that `id` keeps the new toast.

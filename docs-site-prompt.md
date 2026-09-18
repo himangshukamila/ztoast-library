@@ -181,6 +181,13 @@ automatically.
   mismatch in the Next.js App Router.
 - A toast with a non-finite duration shows no progress bar, because there is
   nothing to count down.
+- **The shadow is painted from the first frame of the enter**, and is dropped
+  only while the toast animates out (when the card has to shrink inside a
+  clipping row, and is fading out anyway). If you see the shadow arrive late, or
+  see a hard-edged dark rectangle during the enter animation, the site is on an
+  older build — do **not** work around it by overriding `shadow` with a smaller
+  value, and do not set a shadow through `style: { boxShadow }`, which bypasses
+  the handling. Use the `shadow` option.
 - Style values are validated before reaching the DOM; an unsafe value (containing
   `;`, `{`, `}`, a backslash, a CSS comment, `javascript:`, or a `url()` that is not
   https / relative / `data:image`) is dropped and the default is used.

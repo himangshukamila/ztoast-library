@@ -1,6 +1,6 @@
 {
   "name": "ztoast",
-  "version": "0.1.8",
+  "version": "0.1.10",
   "description": "Zero-dependency React toasts: toast.success(text, icon, style), free placement anywhere on screen, ultra smooth motion, countdown progress with pause on hover.",
   "homepage": "https://ztoast.onrender.com",
   "type": "module",
