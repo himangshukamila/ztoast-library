@@ -39,7 +39,7 @@ function mergeSettings(
   return merged;
 }
 
-export function Toaster({ max, ...defaults }: ToasterProps = {}) {
+export function Toaster({ max, ...defaults }: ToasterProps) {
   const toasts = useToastList();
   // a portal cannot be rendered during server rendering or the first hydration
   // pass - the markup would not match what the server produced. mounting on the

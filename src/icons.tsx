@@ -8,6 +8,14 @@ import type { ToastIcon, ToastVariant } from "./types";
 
 const SIZE = 18;
 
+export function isIconComponent(value: unknown): value is ComponentType<Record<string, unknown>> {
+  if (typeof value === "function") return true;
+  if (value === null || typeof value !== "object") return false;
+  // memo and forwardRef return component objects, unlike rendered JSX nodes.
+  const type = (value as { $$typeof?: unknown }).$$typeof;
+  return type === Symbol.for("react.memo") || type === Symbol.for("react.forward_ref");
+}
+
 function strokeProps(color: string): SVGProps<SVGSVGElement> {
   return {
     width: SIZE,
@@ -23,7 +31,7 @@ function strokeProps(color: string): SVGProps<SVGSVGElement> {
   };
 }
 
-function variantIcon(variant: ToastVariant, color: string): ReactNode {
+function variantIcon(variant: ToastVariant, color: string, reducedMotion: boolean): ReactNode {
   switch (variant) {
     case "success":
       return (
@@ -67,14 +75,14 @@ function variantIcon(variant: ToastVariant, color: string): ReactNode {
               24 - and pivot 3px off centre, orbiting instead of spinning */}
           <g>
             <path d="M12 3a9 9 0 0 1 9 9" />
-            <animateTransform
+            {!reducedMotion && <animateTransform
               attributeName="transform"
               type="rotate"
               from="0 12 12"
               to="360 12 12"
               dur="0.8s"
               repeatCount="indefinite"
-            />
+            />}
           </g>
         </svg>
       );
@@ -86,15 +94,16 @@ function variantIcon(variant: ToastVariant, color: string): ReactNode {
 export function renderIcon(
   icon: ToastIcon | undefined,
   variant: ToastVariant,
-  color: string
+  color: string,
+  reducedMotion = false
 ): ReactNode {
-  if (icon === undefined) return variantIcon(variant, color);
+  if (icon === undefined) return variantIcon(variant, color, reducedMotion);
   // `icon: false` (or null) explicitly means "no icon at all"
   if (icon === false || icon === null) return null;
 
   const node =
-    typeof icon === "function"
-      ? createElement(icon as ComponentType<Record<string, unknown>>, {
+    isIconComponent(icon)
+      ? createElement(icon, {
           size: SIZE,
           color,
         })

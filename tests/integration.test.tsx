@@ -13,12 +13,21 @@ afterEach(() => {
   act(() => {
     for (const record of [...getToasts()]) drop(record.id);
   });
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 function card(): HTMLElement {
   const element = document.querySelector("[data-ztoast]");
   if (!element) throw new Error("no toast rendered");
   return element as HTMLElement;
+}
+
+function surface(element: HTMLElement = card()): HTMLElement {
+  const result = element.querySelector<HTMLElement>("[data-ztoast-surface]");
+  if (!result) throw new Error("no toast surface rendered");
+  return result;
 }
 
 function viewports(): HTMLElement[] {
@@ -36,7 +45,7 @@ function viewportOf(text: string): HTMLElement {
 }
 
 describe("the toast api", () => {
-  it("renders a message, an icon node and a description", () => {
+  it("groups one icon and the message in the notch above the description", () => {
     render(<Toaster />);
 
     act(() => {
@@ -45,9 +54,50 @@ describe("the toast api", () => {
       });
     });
 
-    expect(screen.getByText("profile updated")).toBeTruthy();
-    expect(screen.getByText("all your settings have been saved")).toBeTruthy();
-    expect(screen.getByTestId("icon")).toBeTruthy();
+    const message = screen.getByText("profile updated");
+    const description = screen.getByText("all your settings have been saved");
+    const heading = message.closest("[data-ztoast-heading]");
+    const body = description.closest("[data-ztoast-body]");
+
+    expect(heading).not.toBeNull();
+    expect(body).not.toBeNull();
+    expect(heading?.contains(screen.getByTestId("icon"))).toBe(true);
+    expect(heading?.contains(description)).toBe(false);
+    expect(body?.contains(message)).toBe(false);
+    expect(screen.getAllByTestId("icon")).toHaveLength(1);
+    expect(screen.getAllByText("profile updated")).toHaveLength(1);
+    expect(card().contains(heading)).toBe(true);
+    expect(card().contains(body)).toBe(true);
+  });
+
+  it("keeps message-only toasts compact without an empty description panel", () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.success("saved");
+    });
+
+    expect(screen.getByText("saved").closest("[data-ztoast-heading]")).not.toBeNull();
+    expect(card().querySelector("[data-ztoast-body]")).toBeNull();
+  });
+
+  it("announces the heading and description together with the right urgency", () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.success("saved", { description: "your changes are available" });
+      toast.error("save failed", { description: "please try again" });
+    });
+
+    const success = screen.getByRole("status");
+    const error = screen.getByRole("alert");
+    expect(success.getAttribute("aria-live")).toBe("polite");
+    expect(error.getAttribute("aria-live")).toBe("assertive");
+    for (const element of [success, error]) {
+      expect(element.getAttribute("aria-atomic")).toBe("true");
+      expect(element.querySelector("[data-ztoast-heading]")).not.toBeNull();
+      expect(element.querySelector("[data-ztoast-body]")).not.toBeNull();
+    }
   });
 
   it("needs nothing but a message", () => {
@@ -77,7 +127,7 @@ describe("the toast api", () => {
   });
 
   it("accepts a config object as the second argument", () => {
-    render(<Toaster />);
+    render(<Toaster closable />);
 
     act(() => {
       toast.info("no close button here", { closable: false });
@@ -102,15 +152,14 @@ describe("the toast api", () => {
     render(<Toaster />);
 
     act(() => {
-      toast.success("saved", "🎉", { description: "a description top-aligns" });
+      toast.success("saved", "🎉", { description: "a description sits below" });
     });
 
     const wrapper = screen.getByText("🎉");
-    const cardEl = screen.getByText("saved").closest("[data-ztoast]") as HTMLElement;
+    const heading = screen.getByText("saved").closest("[data-ztoast-heading]") as HTMLElement;
 
-    // the card top-aligns its icon once there is a description, so a glyph with
-    // a zero height line box would ride up over the card's top edge
-    expect(cardEl.style.alignItems).toBe("flex-start");
+    // An emoji needs its own line box even when the title and icon are centred.
+    expect(heading.style.alignItems).toBe("center");
     expect(wrapper.style.lineHeight).toBe("1");
     expect(wrapper.style.fontSize).toBe("18px");
   });
@@ -125,7 +174,7 @@ describe("the toast api", () => {
     const svg = screen
       .getByText("syncing records")
       .closest("[data-ztoast]")
-      ?.getElementsByTagName("svg")[0] as SVGSVGElement;
+      ?.querySelector("[data-ztoast-icon] svg") as SVGSVGElement;
     const spin = svg.getElementsByTagName("animateTransform")[0];
 
     // the centre is given in viewBox units, so the animated element has to be
@@ -142,6 +191,41 @@ describe("the toast api", () => {
     expect(svg.getElementsByTagName("circle")).toHaveLength(1);
   });
 
+  it("honours reduced motion and follows preference changes until unmount", () => {
+    const listeners = new Set<() => void>();
+    const media = {
+      matches: true,
+      addEventListener: vi.fn((_event: string, callback: () => void) => {
+        listeners.add(callback);
+      }),
+      removeEventListener: vi.fn((_event: string, callback: () => void) => {
+        listeners.delete(callback);
+      }),
+    };
+    vi.stubGlobal("matchMedia", vi.fn(() => media));
+    const { unmount } = render(<Toaster />);
+
+    act(() => toast.loading("loading quietly"));
+    expect(card().querySelector("[data-ztoast-icon] svg")).not.toBeNull();
+    expect(card().querySelector("animateTransform")).toBeNull();
+    expect(card().style.transform).toBe("none");
+
+    act(() => {
+      media.matches = false;
+      for (const listener of listeners) listener();
+    });
+    expect(card().querySelector("[data-ztoast-icon] animateTransform")).not.toBeNull();
+
+    act(() => {
+      media.matches = true;
+      for (const listener of listeners) listener();
+    });
+    expect(card().querySelector("animateTransform")).toBeNull();
+
+    unmount();
+    expect(listeners.size).toBe(0);
+  });
+
   it("centres the icon when there is no description", () => {
     render(<Toaster />);
 
@@ -149,7 +233,8 @@ describe("the toast api", () => {
       toast.success("just a line");
     });
 
-    expect(card().style.alignItems).toBe("center");
+    const heading = card().querySelector<HTMLElement>("[data-ztoast-heading]");
+    expect(heading?.style.alignItems).toBe("center");
   });
 
   it("renders an emoji icon and can turn the icon off", () => {
@@ -157,27 +242,28 @@ describe("the toast api", () => {
 
     act(() => {
       toast.show("party", "🎉");
-      // the variant icon plus the close button is two svgs; `false` leaves one
       toast.success("with icon", { id: "a" });
       toast.success("bare", false, { id: "b" });
     });
 
-    const svgCount = (text: string) =>
-      screen.getByText(text).closest("[data-ztoast]")!.querySelectorAll("svg")
-        .length;
+    const iconCount = (text: string) =>
+      screen.getByText(text).closest("[data-ztoast]")!
+        .querySelectorAll("[data-ztoast-icon]").length;
 
     expect(screen.getByText("🎉")).toBeTruthy();
-    expect(svgCount("with icon")).toBe(2);
-    expect(svgCount("bare")).toBe(1);
+    expect(iconCount("with icon")).toBe(1);
+    expect(iconCount("bare")).toBe(0);
   });
 
   it("dismisses on click of the close button", async () => {
     render(<Toaster />);
 
     act(() => {
-      toast.info("temporary");
+      toast.info("temporary", { closable: true });
     });
-    fireEvent.click(screen.getByLabelText("Dismiss notification"));
+    const close = screen.getByLabelText("Dismiss notification");
+    expect(close.closest("[data-ztoast-heading]")).not.toBeNull();
+    fireEvent.click(close);
 
     await waitFor(() => expect(screen.queryByText("temporary")).toBeNull(), {
       timeout: 2000,
@@ -355,30 +441,37 @@ describe("the toast api", () => {
 });
 
 describe("styling", () => {
-  it("applies the colours, size and font given in the config", () => {
-    render(<Toaster />);
+  it.each([undefined, "your settings have been saved"])(
+    "applies configured styling with description %s",
+    (description) => {
+      render(<Toaster />);
 
-    act(() => {
-      toast.success("styled", null, {
-        textColor: "rgb(1, 2, 3)",
-        bgColor: "rgb(4, 5, 6)",
-        width: 340,
-        height: 64,
-        font: "Inter, sans-serif",
-        radius: 22,
-        padding: "10px 18px",
+      act(() => {
+        toast.success("styled", null, {
+          textColor: "rgb(1, 2, 3)",
+          bgColor: "rgb(4, 5, 6)",
+          width: 340,
+          height: 64,
+          font: "Inter, sans-serif",
+          radius: 22,
+          padding: "10px 18px",
+          description,
+        });
       });
-    });
 
-    const element = card();
-    expect(element.style.color).toBe("rgb(1, 2, 3)");
-    expect(element.style.background).toContain("rgb(4, 5, 6)");
-    expect(element.style.width).toBe("340px");
-    expect(element.style.height).toBe("64px");
-    expect(element.style.fontFamily).toBe("Inter, sans-serif");
-    expect(element.style.borderRadius).toBe("22px");
-    expect(element.style.padding).toBe("10px 18px");
-  });
+      const element = card();
+      const painted = surface(element);
+      expect(element.style.color).toBe("rgb(1, 2, 3)");
+      expect(painted.style.background).toContain("rgb(4, 5, 6)");
+      expect(element.style.width).toBe("340px");
+      expect(element.style.height).toBe("64px");
+      expect(element.style.fontFamily).toBe("Inter, sans-serif");
+      expect(element.style.borderRadius).toBe("22px");
+      for (const content of element.querySelectorAll<HTMLElement>("[data-ztoast-heading], [data-ztoast-body]")) {
+        expect(content.style.padding).toBe("10px 18px");
+      }
+    }
+  );
 
   it("lets an explicit width escape the default max width", () => {
     render(<Toaster />);
@@ -396,9 +489,12 @@ describe("styling", () => {
     const fitted = screen
       .getByText("default")
       .closest("[data-ztoast]") as HTMLElement;
-    expect(fitted.style.width).toBe("");
-    expect(fitted.style.maxWidth).toBe("min(92vw, 440px)");
-    expect(fitted.style.minWidth).toBe("240px");
+    // CSSOM may simplify calc() expressions when serializing them.
+    const expected = document.createElement("div").style;
+    expected.maxWidth = "min(440px, calc(100vw - 32px))";
+    expect(fitted.style.width).toBe("fit-content");
+    expect(fitted.style.maxWidth).toBe(expected.maxWidth);
+    expect(fitted.style.minWidth).toBe("");
   });
 
   it("paints its shadow on the very first frame", () => {
@@ -420,6 +516,20 @@ describe("styling", () => {
     expect(card().style.opacity).toBe("0");
   });
 
+  it("removes the default shadow when style.boxShadow explicitly disables it", () => {
+    render(<Toaster />);
+
+    act(() => {
+      toast.success("flat surface", {
+        description: "no shadow requested",
+        style: { boxShadow: "none" },
+      });
+    });
+
+    expect(card().style.boxShadow).toBe("none");
+    expect(card().style.filter).not.toContain("drop-shadow");
+  });
+
   it("keeps the shadow through the enter, whatever the easing", async () => {
     render(<Toaster />);
 
@@ -438,7 +548,7 @@ describe("styling", () => {
     // fully painted rather than waiting for the row or the card
     expect(card().style.boxShadow).toBe("0 10px 20px rgb(0, 0, 0)");
     expect(grid()?.style.transition).toBe(
-      "grid-template-rows 260ms linear 0ms"
+      "grid-template-rows 400ms linear 0ms"
     );
     expect(card().style.transition).toContain("transform 800ms");
   });
@@ -462,7 +572,7 @@ describe("styling", () => {
     expect(clipBox("upwards").style.alignItems).toBe("flex-end");
   });
 
-  it("drops the shadow again while the toast animates out", async () => {
+  it("fades the shadow together with the toast instead of dropping it at departure", async () => {
     render(<Toaster />);
 
     act(() => {
@@ -483,8 +593,11 @@ describe("styling", () => {
       toast.dismiss("leaving");
     });
 
-    // clipping resumes for the collapse, so the shadow has to go with it
-    expect(card().style.boxShadow).toBe("none");
+    // Overall opacity fades the shadow too; it must not abruptly disappear
+    // or be clipped when the final departure begins.
+    expect(card().style.boxShadow).toBe("0 10px 20px rgb(0, 0, 0)");
+    expect(card().parentElement?.parentElement?.style.overflow).toBe("visible");
+    expect(card().style.transition).toContain("opacity 450ms");
   });
 
   it("accepts a gradient as the background", () => {
@@ -496,7 +609,43 @@ describe("styling", () => {
       });
     });
 
-    expect(card().style.background).toContain("linear-gradient");
+    expect(surface().style.background).toContain("linear-gradient");
+  });
+
+  it("updates the silhouette after a resize and releases its observer on unmount", () => {
+    let width = 360;
+    let notifyResize: (() => void) | undefined;
+    const disconnect = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) {
+        notifyResize = callback;
+      }
+      observe = vi.fn();
+      disconnect = disconnect;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute("data-ztoast")) return width;
+      return this.hasAttribute("data-ztoast-heading") ? 240 : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute("data-ztoast")) return 120;
+      return this.hasAttribute("data-ztoast-heading") ? 50 : 0;
+    });
+    const { unmount } = render(<Toaster />);
+
+    act(() => toast.success("responsive surface", { description: "fits its contents" }));
+    const initialPath = surface().style.clipPath;
+    expect(initialPath).not.toBe("");
+    expect(notifyResize).toBeTypeOf("function");
+
+    act(() => {
+      width = 420;
+      notifyResize?.();
+    });
+    expect(surface().style.clipPath).not.toBe(initialPath);
+
+    unmount();
+    expect(disconnect).toHaveBeenCalledTimes(1);
   });
 
   it("drops an unsafe value and keeps the default", () => {
@@ -506,8 +655,7 @@ describe("styling", () => {
       toast.show("guarded", { bgColor: "url(javascript:alert(1))" });
     });
 
-    const style = card().getAttribute("style") ?? "";
-    expect(style).not.toContain("javascript");
+    expect(card().outerHTML).not.toContain("javascript");
   });
 
   it("takes defaults from <Toaster /> and lets a toast override them", () => {
@@ -528,7 +676,7 @@ describe("styling", () => {
     expect(inherits.style.borderRadius).toBe("4px");
     expect(overrides.style.borderRadius).toBe("30px");
     // the light theme default background, from the toaster props
-    expect(inherits.style.background).toContain("rgb(255, 255, 255)");
+    expect(surface(inherits).style.background).toContain("rgb(255, 255, 255)");
   });
 });
 
@@ -749,6 +897,7 @@ describe("the countdown", () => {
     act(() => {
       toast.show("short lived", { duration: 200 });
     });
+    expect(screen.queryByLabelText("Dismiss notification")).toBeNull();
 
     await waitFor(() => expect(screen.queryByText("short lived")).toBeNull(), {
       timeout: 3000,
@@ -788,6 +937,64 @@ describe("the countdown", () => {
     await waitFor(() => expect(screen.queryByText("ignores hover")).toBeNull(), {
       timeout: 3000,
     });
+  });
+
+  it("preserves the remaining time when focus moves within a notification", () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+
+    act(() => {
+      toast.info("review this change", {
+        closable: true,
+        duration: 1000,
+        motion: { enter: 1, exit: 1, exitHold: 0 },
+        description: <button type="button">Review change</button>,
+      });
+    });
+    act(() => vi.advanceTimersByTime(50));
+    act(() => vi.advanceTimersByTime(200));
+    act(() => screen.getByRole("button", { name: "Review change" }).focus());
+    act(() => vi.advanceTimersByTime(1600));
+
+    const close = screen.getByRole("button", { name: "Dismiss notification" });
+    act(() => close.focus());
+    act(() => vi.advanceTimersByTime(1600));
+    expect(getToasts()[0]?.leaving).toBe(false);
+
+    act(() => close.blur());
+    act(() => vi.advanceTimersByTime(400));
+    // Time spent focused, including the focus transfer, must not consume the
+    // roughly 800ms that remained before the first button received focus.
+    expect(getToasts()[0]?.leaving).toBe(false);
+    act(() => vi.advanceTimersByTime(500));
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.queryByText("review this change")).toBeNull();
+  });
+
+  it("keeps the countdown paused when the pointer leaves a focused toast", () => {
+    vi.useFakeTimers();
+    render(<Toaster />);
+
+    act(() => {
+      toast.info("keyboard interaction", {
+        closable: true,
+        duration: 300,
+        motion: { enter: 1, exit: 1 },
+      });
+    });
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.mouseEnter(card());
+    const close = screen.getByRole("button", { name: "Dismiss notification" });
+    act(() => close.focus());
+    fireEvent.mouseLeave(card());
+
+    act(() => vi.advanceTimersByTime(1000));
+    expect(getToasts()[0]?.leaving).toBe(false);
+
+    act(() => close.blur());
+    act(() => vi.advanceTimersByTime(350));
+    act(() => vi.advanceTimersByTime(20));
+    expect(screen.queryByText("keyboard interaction")).toBeNull();
   });
 
   it("keeps a loading toast up until it is replaced", async () => {

@@ -52,19 +52,21 @@ export type ToastPosition =
 
 /**
  * an icon can be a rendered node (<FaCheck />, an <svg>, an emoji string) or a
- * component reference (FaCheck), which is called with { size, color }.
+ * component reference (FaCheck, including memo/forwardRef), rendered with { size, color }.
  */
 export type ToastIcon = ReactNode | ComponentType<Record<string, unknown>>;
 
 /** every timing knob of the enter/exit animation. all optional. */
 export interface ToastMotion {
-  /** enter duration in ms, default 520 */
+  /** total enter duration in ms, including notch arrival and panel expansion; default 500 */
   enter?: number;
-  /** exit duration in ms, default 340 */
+  /** exit movement duration in ms, including panel collapse and notch departure; default 450 */
   exit?: number;
-  /** enter easing, default cubic-bezier(0.16, 1, 0.3, 1) */
+  /** pause in ms between panel collapse and pill departure; default 2000, 0 skips it */
+  exitHold?: number;
+  /** enter easing, default cubic-bezier(0.33, 0, 0.67, 1) */
   easing?: string;
-  /** exit easing, default cubic-bezier(0.4, 0, 0.2, 1) */
+  /** exit easing, default cubic-bezier(0.33, 0, 0.67, 1) */
   exitEasing?: string;
   /** slide distance in px, default 22 */
   slide?: number;
@@ -82,11 +84,11 @@ export interface ToastConfig {
   id?: string | number;
   /** ms before auto dismiss; Infinity keeps it until dismissed. default 4000 */
   duration?: number;
-  /** secondary line under the message */
+  /** text or JSX (including images and components) in the expanded panel; omit for a pill */
   description?: ReactNode;
   /** overrides the built in variant icon; `false` removes it */
   icon?: ToastIcon;
-  /** show the dismiss button, default true */
+  /** show the dismiss button when true; default false. Timed dismissal is independent. */
   closable?: boolean;
   /** show the countdown progress bar, default true */
   progress?: boolean;
@@ -121,9 +123,9 @@ export interface ToastConfig {
   font?: string;
   fontSize?: number | string;
   fontWeight?: number | string;
-  /** corner radius, default 14 */
+  /** corner radius, default 20 for panels or fully rounded for pills */
   radius?: number | string;
-  /** inner spacing, default "13px 15px" */
+  /** overrides the inner spacing of both the heading and description panel */
   padding?: number | string;
   /** border shorthand */
   border?: string;
@@ -135,7 +137,7 @@ export interface ToastConfig {
   iconColor?: string;
   /** base palette when no explicit colours are given, default "dark" */
   theme?: "dark" | "light";
-  /** escape hatch: raw css merged over everything else */
+  /** raw wrapper CSS; background, border, radius and padding also style the notch surface */
   style?: CSSProperties;
 
   motion?: ToastMotion;

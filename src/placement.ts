@@ -30,6 +30,8 @@ export interface Placement {
   style: CSSProperties;
   direction: StackDirection;
   from: SlideFrom;
+  notch: "top" | "bottom";
+  notchAlign: "left" | "center" | "right";
 }
 
 type Vertical = "top" | "center" | "bottom";
@@ -310,6 +312,13 @@ export function resolvePlacement(settings: ToastConfig): Placement {
   // stacking away from the anchor means nothing already on screen has to move
   style.flexDirection = direction === "up" ? "column-reverse" : "column";
 
+  const notch = geometry.vertical === "bottom" ||
+    (geometry.vertical === "center" && (percent(geometry.y) ?? 0) > 50)
+    ? "bottom" : "top";
+  const horizontalRatio = percent(geometry.left) ?? 50;
+  const notchAlign = geometry.horizontal !== "center" ? geometry.horizontal
+    : horizontalRatio < 50 ? "left" : horizontalRatio > 50 ? "right" : "center";
+
   // the key covers every value that shapes the container, and nothing that is
   // per card - two toasts at the same spot must share one stack
   const key = [
@@ -321,7 +330,9 @@ export function resolvePlacement(settings: ToastConfig): Placement {
     style.alignItems,
     style.flexDirection,
     style.zIndex,
+    notch,
+    notchAlign,
   ].join("|");
 
-  return { key, style, direction, from: resolveFrom(settings.motion?.from, geometry) };
+  return { key, style, direction, notch, notchAlign, from: resolveFrom(settings.motion?.from, geometry) };
 }

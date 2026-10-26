@@ -3,20 +3,37 @@
 Toast notifications for React, with the icon and the styling passed straight into the call:
 
 ```tsx
-toast.success("Project saved", <FiCheck />, { bgColor: "#052e16", width: 360 });
+toast.success("Project saved", {
+  description: "Your changes have been saved.",
+  bgColor: "#052e16",
+});
 ```
 
+- **A notch for the icon and heading**, with a wider description panel that opens away from the screen edge.
 - **One component to mount, then call `toast.*` from anywhere** — including files that are not components.
 - **Put a toast anywhere on screen** — nine named spots, an offset from any edge (`"top-10vh"`), or an exact coordinate.
-- **Smooth by default** — every toast fades, slides, unblurs and scales in over half a second, and the stack glides closed when one leaves.
+- **Smooth by default** — the notch arrives first, unfolds into the description, then folds back before fading away on dismissal.
 - **Countdown bar that pauses on hover**, on by default.
 - **No CSS file to import, no runtime dependencies.**
+
+## What's new in 0.1.11
+
+- The icon and heading share one notch. It follows left, center, or right placement, and bottom toasts open upward.
+- Omit `description` for a fully rounded pill. Add text, images, or a React component for an expanding description panel.
+- Panels fit their content with centered text and compact side padding. Light and dark themes use thin, variant-colored borders; gradients still cover the whole shape.
+- Opening takes **500ms** by default. Closing folds the description into the pill, holds it for **2000ms**, then squeezes both ends toward the center while fading. Closing movement takes **450ms**, separate from the hold.
+- The X button is now **opt-in** with `closable: true`. Automatic dismissal still starts after `duration`, which defaults to **4000ms**.
+- The local playground includes layout, JSX, icon, background, position, and animation controls with matching code examples.
+- Release fixes include CommonJS TypeScript declaration resolution, `React.createElement(Toaster, options)` typing, and safe same-ID replacements created inside `onClose`. Custom icon references wrapped in `memo` or `forwardRef` now work in both call forms.
+
+Existing users should review the [upgrade notes](#upgrading-to-the-notch-design), especially the dismiss-button and timing defaults.
 
 ---
 
 ## Contents
 
 **Start here**
+
 1. [Install](#1-install)
 2. [Set it up](#2-set-it-up)
 3. [Show a toast](#3-show-a-toast)
@@ -28,7 +45,7 @@ toast.success("Project saved", <FiCheck />, { bgColor: "#052e16", width: 360 });
 
 **Look things up**
 
-[Full options reference](#full-options-reference) · [Recipes](#recipes) · [Troubleshooting](#troubleshooting) · [Next.js and SSR](#nextjs-and-ssr) · [How it behaves](#how-it-behaves) · [Security](#security) · [For contributors](#for-contributors) · [Upgrading from 0.x](#upgrading-from-0x)
+[Full options reference](#full-options-reference) · [Recipes](#recipes) · [Troubleshooting](#troubleshooting) · [Next.js and SSR](#nextjs-and-ssr) · [How it behaves](#how-it-behaves) · [Security](#security) · [For contributors](#for-contributors) · [Upgrade notes](#upgrading-to-the-notch-design)
 
 ---
 
@@ -40,7 +57,7 @@ toast.success("Project saved", <FiCheck />, { bgColor: "#052e16", width: 360 });
 npm install ztoast
 ```
 
-React 17 or newer. `react` and `react-dom` are peer dependencies; nothing else is installed.
+React 17 or newer. `react` and `react-dom` are peer dependencies; the library has no other runtime dependencies. The package declares Node 18 or newer for tooling that checks `engines`.
 
 ## 2. Set it up
 
@@ -48,12 +65,21 @@ Render `<Toaster />` **once**, at the root of your app. That is the entire setup
 
 ```tsx
 // App.tsx
-import { Toaster } from "ztoast";
+import { Toaster, toast } from "ztoast";
 
 export default function App() {
   return (
     <>
-      <YourApp />
+      <button
+        type="button"
+        onClick={() => toast.success("Saved successfully", {
+          description: "Your changes have been saved.",
+          duration: 4000,
+          closable: true,
+        })}
+      >
+        Save changes
+      </button>
       <Toaster />
     </>
   );
@@ -77,6 +103,77 @@ toast.show("New message");        // neutral, no icon
 
 That is all you need to use the library. Everything below is optional.
 
+### The notch layout
+
+The first argument is the heading in the notch. Use `description` for the text in the wider panel:
+
+```tsx
+toast.success("Saved successfully", {
+  description: "Your changes have been saved. You’re all set.",
+});
+```
+
+The icon and heading appear first, then the description panel unfolds smoothly. The notch follows the placement: left toasts anchor it to the left corner, right toasts to the right corner, and center toasts keep it centered. Top toasts expand downward; bottom toasts keep the notch at the bottom and expand upward. Dismissal folds the panel into the same anchored notch, holds the pill for two seconds, then draws both ends into the pill's center as it fades away. Without a description, the toast stays a compact capsule and dismisses without the extra hold.
+
+For free coordinates, an explicit left or right anchor determines the notch alignment. Otherwise, percentage `x` values below or above `50%` align it left or right; `50%` keeps it centered.
+
+Light and dark themes use their own accent colors for the 1px border and built-in icon. Custom backgrounds and gradients flow continuously through both sections. Reduced motion skips the unfolding, folding, and pill hold.
+
+### Pills and JSX descriptions
+
+Leave out `description` for a pill that fits its heading and icon, with fully rounded ends. Custom icons work in both layouts:
+
+```tsx
+toast.success("Saved successfully");
+toast.info("Team update", { icon: <span aria-hidden="true">👥</span> });
+```
+
+`description` accepts React nodes: text, images, JSX layouts, and your own components, including components with state and buttons. The heading is the first argument to `toast.info`; it does not use a `{ title, description }` single-object signature.
+
+```tsx
+function TeamUpdate() {
+  const avatars = [
+    "/memojis/Rectangle.png",
+    "/memojis/Rectangle-1.png",
+    "/memojis/Rectangle-2.png",
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "center" }}>
+        {avatars.map((src, index) => (
+          <img
+            key={src}
+            src={src}
+            alt=""
+            width={28}
+            height={28}
+            style={{
+              borderRadius: "50%",
+              border: "2px solid white",
+              objectFit: "cover",
+              marginLeft: index === 0 ? 0 : -8,
+            }}
+          />
+        ))}
+      </div>
+      <span>3 new members joined the project.</span>
+    </div>
+  );
+}
+
+toast.info("Team update", {
+  icon: <span aria-hidden="true">👥</span>,
+  description: <TeamUpdate />,
+  duration: Infinity,
+  closable: true,
+});
+```
+
+Use your own image files at those paths. Image dimensions reserve space while they load; for larger images, use `maxWidth: "100%"` and `height: "auto"`. The toast adjusts when its content changes size. Tailwind classes in your JSX work when your app includes Tailwind; the library itself needs no stylesheet.
+
+In the local playground, choose **None — pill only** or **Team update — JSX component** under **Description content**, then choose an icon and click **Show toast**. The JSX example includes images and a working button, and the generated snippet includes its component code.
+
 ## 4. The three arguments
 
 ```
@@ -89,8 +186,8 @@ toast.success( message , icon , style )
 
 ```tsx
 toast.success("Deployed");                                 // message
-toast.success("Deployed", <FiCheck />);                    // + icon
-toast.success("Deployed", <FiCheck />, { width: 360 });     // + style
+toast.success("Deployed", "🎉");                          // + icon
+toast.success("Deployed", "🎉", { width: 360 });           // + style
 toast.success("Deployed", { width: 360 });                 // style, no icon
 ```
 
@@ -111,15 +208,23 @@ The second argument works out which one you meant: an icon (a React element, a c
 Each variant has a built-in icon, so you only pass one when you want something different.
 
 ```tsx
+function CheckIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="m5 12 4 4L19 6" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 toast.success("Saved");                    // built-in check
-toast.success("Saved", <FiCheck />);       // your own element
-toast.success("Saved", FiCheck);           // a component reference
+toast.success("Saved", <CheckIcon />);      // your own element
+toast.success("Saved", CheckIcon);          // a component reference
 toast.success("Saved", "🎉");              // an emoji
 toast.success("Saved", false);             // no icon
-toast.success("Saved", { icon: <FiCheck /> });   // same thing, inside the config
+toast.success("Saved", { icon: <CheckIcon /> }); // same thing, inside the config
 ```
 
-A component reference is called with `{ size: 18, color }`, which is what `react-icons`, `lucide-react` and `@heroicons/react` expect — so it picks up the variant colour automatically. Pass a rendered element instead if you want full control.
+Component references, including icons wrapped in `memo` or `forwardRef`, receive `{ size: 18, color }`. Pass them positionally (`toast.success("Saved", CheckIcon)`) or through the config (`toast.success("Saved", { icon: CheckIcon })`). For custom props, prefer a rendered element such as `<YourIcon size={18} />`, using that component's supported props. Give decorative custom icons `aria-hidden="true"`.
 
 ## 6. Position
 
@@ -164,7 +269,7 @@ Toasts at the same spot stack together; different spots stack separately. New on
 
 ## 7. Styling
 
-Plain option names. Numbers mean pixels. Nothing is a class name, so there is no CSS to override.
+These options style the toast inline. Numeric dimensions mean pixels; custom JSX can still use your application's classes.
 
 ```tsx
 toast.show("Custom", {
@@ -185,11 +290,17 @@ Useful to know:
 - `style` is the escape hatch for anything without its own option: `style: { backdropFilter: "blur(8px)" }`.
 - Colours accept hex, `rgb()`, `hsl()`, `oklch()` and CSS variables: `textColor: "var(--brand-fg)"`.
 
+The continuous SVG outline accepts CSS border widths such as `1px`, `0.1rem`, or `thin`, `medium`, and `thick`. Border styles `solid`, `dashed`, and `dotted` are rendered; `none` and `hidden` remove the outline. The CSS styles `double`, `groove`, `ridge`, `inset`, and `outset` use a solid-outline fallback.
+
+```tsx
+toast.info("Custom outline", { border: "0.1rem dashed #60a5fa" });
+```
+
 Full list in the [reference](#style-options).
 
 ## 8. Timing, progress bar and hover
 
-A toast lasts **4 seconds** and shows a progress bar counting that down. Hovering it — or tabbing into it — **freezes the bar and the timer** until you leave.
+A toast starts dismissing after **4 seconds** and shows a progress bar counting that down. Hovering it — or tabbing into it — **freezes the bar and the timer** until you leave. The closing animation and any pill hold happen after this countdown.
 
 ```tsx
 toast.success("Uploaded", { duration: 8000 });        // longer
@@ -197,17 +308,20 @@ toast.show("Stays put",   { duration: Infinity });    // until dismissed
 toast.show("No bar",      { progress: false });
 toast.show("Never pauses",{ pauseOnHover: false });
 toast.show("No X button", { closable: false });
+toast.show("With an X",   { closable: true });
 ```
 
 A toast with `duration: Infinity` has no progress bar, because there is nothing to count down.
 
+The dismiss button is opt-in: pass `closable: true` to show it. Otherwise, the toast starts closing after its `duration` (4000ms by default). Persistent toasts can be closed with `toast.dismiss(id)` or an optional dismiss button.
+
 ## 9. Motion
 
-The defaults are tuned to feel unhurried, so you should not need this. If you do:
+Change the timings globally on `<Toaster />` or for one notification:
 
 ```tsx
 toast.show("Slower, from further away", {
-  motion: { enter: 900, exit: 500, slide: 40 },
+  motion: { enter: 1400, exit: 900, slide: 40 },
 });
 
 toast.show("Plain fade", { motion: { slide: 0, blur: 0, scale: 1 } });
@@ -215,14 +329,19 @@ toast.show("Plain fade", { motion: { slide: 0, blur: 0, scale: 1 } });
 
 | Key | Default | What it does |
 |---|---|---|
-| `enter` / `exit` | `520` / `340` | Duration in ms |
+| `enter` / `exit` | `500` / `450` | Opening and closing movement durations in ms, including the notch and description stages |
+| `exitHold` | `2000` | Time the collapsed pill stays visible before departure; `0` skips the pause |
 | `slide` | `22` | How far it travels in, in px |
 | `scale` | `0.94` | Size it grows from |
 | `blur` | `2` | Blur it sharpens from, in px |
 | `from` | `"auto"` | Direction: `auto` follows the position, or `top` / `bottom` / `left` / `right` / `none` |
-| `easing` / `exitEasing` | expo-out / ease-out | Any CSS easing function |
+| `easing` / `exitEasing` | `cubic-bezier(0.33, 0, 0.67, 1)` | Any CSS easing function for the heading and content transitions |
 
-If the operating system asks for reduced motion, the travel, scale and blur are dropped automatically.
+All entry stages scale with `enter`: the heading arrives over the first 40%, then the panel unfolds over the remaining 60%. On close, the panel folds back over half of `exit`, the pill waits for `exitHold`, and then both ends draw into its center while it fades over the remaining half. The pill and its shadow fade together without clipping. Total dismissal time is `exit + exitHold`; pill-only toasts and dismissals before the panel opens skip the hold. Set `scale: 1` for a fade without the squeeze.
+
+Set global defaults with `<Toaster motion={{ enter: 500, exit: 450, exitHold: 2000 }} />`, or pass `motion` to an individual toast. The playground's **Opening**, **Closing**, and **Pill hold after closing** controls let you test these values on new toasts.
+
+If the operating system asks for reduced motion, the toast appears fully expanded without travel, scaling, blur or unfolding. Dismissal skips folding and the extra hold too. Set `enter: 0` or `exit: 0` to make that stage immediate; `exit: 0` also skips the hold.
 
 ## 10. Promises
 
@@ -234,7 +353,7 @@ await toast.promise(
   {
     loading: "Deploying…",
     success: (data) => `Live at ${data.url}`,
-    error: (err) => `Failed: ${err.message}`,
+    error: (err) => `Failed: ${err instanceof Error ? err.message : String(err)}`,
   },
   { duration: 5000 }   // optional, applies to the result toast
 );
@@ -286,7 +405,7 @@ return <span>{toasts.length} notifications</span>;
 
 ## 13. Set defaults for every toast
 
-Any option can go on `<Toaster />` instead, and applies to every toast. A toast's own options always win.
+Shared options can go on `<Toaster />` and apply to every toast. A toast's own options win. Keep `id`, `description`, and `onClose` on individual toast calls.
 
 ```tsx
 <Toaster
@@ -311,9 +430,9 @@ Everything here is optional. Every option can also go on `<Toaster />` as a defa
 |---|---|---|
 | `id` | auto | Reuse to replace a toast in place. Per toast only |
 | `duration` | `4000` | ms before it dismisses itself; `Infinity` to keep it |
-| `description` | — | Second line, under the message. Per toast only |
+| `description` | — | Text or JSX, including images and components. Above the heading for bottom positions, below it otherwise; omit for a pill. Per toast only |
 | `icon` | variant icon | Element, component, emoji, or `false` |
-| `closable` | `true` | Show the ✕ button |
+| `closable` | `false` | Pass `true` to show the ✕ button; timed dismissal works independently |
 | `progress` | `true` | Show the countdown bar |
 | `pauseOnHover` | `true` | Freeze the countdown on hover or focus |
 | `onClose` | — | Called once, when the toast starts leaving. Per toast only |
@@ -333,17 +452,17 @@ Everything here is optional. Every option can also go on `<Toaster />` as a defa
 |---|---|---|
 | `textColor` (or `color`) | theme text | |
 | `bgColor` (or `background`) | theme surface | Colour, gradient, or `url(…)` |
-| `width` / `height` | fits content | Without `width` it sits between 240px and `min(92vw, 440px)`; setting `width` replaces that range exactly |
+| `width` / `height` | fits content | Both layouts fit their content up to 440px, with room for the notch shoulders. Defaults keep a 16px viewport gutter. Explicit `width` replaces that range; content keeps its minimum height |
 | `font` | system stack | Font family |
 | `fontSize` / `fontWeight` | `14` / `600` | |
-| `radius` | `14` | Corner radius |
-| `padding` | `"13px 15px"` | |
-| `border` | theme hairline | |
-| `shadow` | theme shadow | |
+| `radius` | `20` for panels; fully rounded for pills | Corner radius, fitted to the content |
+| `padding` | heading `12px 18px 10px`; body `8px 12px 14px` | Overrides both sections. Bottom toasts reverse vertical spacing; the body reserves 44px on the right only when the dismiss button is enabled. Pills use `10px 14px` |
+| `border` | `1px solid` variant accent | CSS length or keyword width; solid, dashed, dotted, none, or hidden. Other CSS border styles use a solid fallback |
+| `shadow` | silhouette shadow | A custom value applies a wrapper box shadow; `"none"` removes it |
 | `progressColor` | variant colour | Progress bar fill |
 | `iconColor` | variant colour | Built-in icon colour |
 | `theme` | `"dark"` | `"dark"` or `"light"` |
-| `style` | — | Raw `CSSProperties`, merged over everything else |
+| `style` | — | Raw wrapper `CSSProperties`; background, border, radius, and padding are applied to the notch surface or content |
 | `motion` | [see above](#9-motion) | |
 
 ### `<Toaster />` only
@@ -383,7 +502,7 @@ Also exported: `ToastIcon`, `ToastMotion`, `NamedPosition`, `EdgeOffsetPosition`
 **Brand-coloured success toast**
 
 ```tsx
-toast.success("Payment received", <FiCheck />, {
+toast.success("Payment received", {
   bgColor: "linear-gradient(135deg, #064e3b, #022c22)",
   textColor: "#ecfdf5",
   progressColor: "#34d399",
@@ -392,13 +511,14 @@ toast.success("Payment received", <FiCheck />, {
 });
 ```
 
-**Centred modal-style notice that waits for the user**
+**Centred notice that waits for the user**
 
 ```tsx
 toast.info("Session expiring", {
   description: "You will be signed out in 2 minutes.",
   position: { x: "50%", y: "50%" },
   duration: Infinity,
+  closable: true,
   width: 420,
 });
 ```
@@ -435,6 +555,10 @@ toast.warn("Check the highlighted fields", { position: "left-20vw" });
 
 **No progress bar.** The toast's `duration` is `Infinity` (which is what `toast.loading` uses), so there is nothing to count down.
 
+**No X button.** It is hidden by default. Set `closable: true` per toast or `<Toaster closable />` for all notifications.
+
+**The pill remains after the description closes.** This is the default two-second hold. Set `motion: { exitHold: 0 }` to skip it, or choose another duration in milliseconds.
+
 **It is hidden behind my modal.** The container already uses a near-maximum `z-index`, so the modal is in a different stacking context. Raise it with `zIndex`, or render the modal before `<Toaster />`.
 
 **Toasts pile up during a burst.** Use `max` on `<Toaster />`; the extras queue and appear as room frees up.
@@ -469,9 +593,9 @@ It renders nothing on the server and nothing on the first client render, mountin
 
 Details that are useful when something surprises you.
 
-**Motion.** Each card sits in a wrapper that animates `grid-template-rows` from `0fr` to `1fr`, so heights are never measured in JavaScript and the stack settles smoothly when a toast leaves. The gap between toasts lives inside that collapsing box, so it closes with the toast instead of leaving a hole. Where `fr` interpolation is unsupported the height snaps while the fade, slide and scale still play.
+**Motion.** Each card sits in a wrapper that animates `grid-template-rows` from `0fr` to `1fr`. The silhouette is measured when content or dimensions change; its animation performs no layout reads or React state updates per frame. The gap between toasts lives inside the collapsing row, so it closes with the toast. Where `fr` interpolation is unsupported the height snaps while the fade and scale still play.
 
-**Nothing clips on the way in.** A clip box sized to the card would slice its shadow off square on three sides — the default shadow reaches 8px past the left and right edges and 26px past the bottom one. So the enter does not clip at all: the card is placed at its final position immediately and simply overflows the row that is still opening up behind it, away from the anchor, into the space the stack is about to fill. It therefore carries its shadow from the first frame and never covers a toast that is already on screen. The exit is the only phase that masks, because there the card really does have to shrink with its row — so the shadow is dropped for those few hundred milliseconds, while the toast is fading out anyway.
+**The row does not clip the toast.** The card overflows its opening row away from the stack anchor, carrying its shadow from the first frame. During departure, the pill draws inward and fades with its shadow while the row closes. Keeping the row unmasked prevents it from slicing off the pill during that transition.
 
 **Timing.** The countdown starts on the first painted frame, not on mount, so the bar and the toast stay in step. It lives in the card, the only place that knows whether the pointer or keyboard is resting on it.
 
@@ -479,9 +603,9 @@ Details that are useful when something surprises you.
 
 **`onClose`.** Fires exactly once, when the toast starts leaving. A callback that throws is caught and reported in development instead of breaking the toast.
 
-**Accessibility.** Error toasts are `role="alert"` / `aria-live="assertive"`; everything else is `role="status"` / `aria-live="polite"`. Icons are hidden from screen readers, the ✕ has a label, and focusing it pauses the countdown so a toast cannot vanish mid-tab.
+**Accessibility.** Error toasts are `role="alert"` / `aria-live="assertive"`; everything else is `role="status"` / `aria-live="polite"`. Built-in icons are hidden from screen readers, the optional ✕ has a label, and focusing controls inside the toast pauses its countdown. Custom JSX remains responsible for its own labels, image alternatives, and keyboard behavior.
 
-**Invalid values.** An unusable `duration` (`NaN`, negative, not a number) becomes "keep until dismissed" rather than dismissing instantly. An unparseable position falls back to `top-right`. A rejected style value falls back to the default.
+**Invalid values.** A non-finite or non-numeric `duration` becomes "keep until dismissed". Zero and negative durations start dismissal immediately after entry begins. An unparseable position falls back to `top-right`. A rejected named style value falls back to the default.
 
 ---
 
@@ -489,17 +613,17 @@ Details that are useful when something surprises you.
 
 The library never uses `dangerouslySetInnerHTML` and never injects a `<style>` tag. Your `message`, `description` and `icon` are React nodes, so text is escaped for you.
 
-The one surface worth guarding is the styling API, since a value could have come from user data. Every raw CSS string passes through [`src/css.ts`](src/css.ts) first. React assigns style values through the CSSOM, where an invalid value is dropped by the browser rather than parsed as new declarations — so this is validation, not escaping, and what it blocks is narrow:
+Named string options such as `bgColor`, `textColor`, `border`, and `shadow` pass through [`src/css.ts`](src/css.ts). React assigns style values through the CSSOM, where an invalid value is dropped by the browser rather than parsed as new declarations. The guard blocks:
 
 - Anything that can execute: `javascript:`, `vbscript:`, `expression(`, `eval(`, `behavior:`, `-moz-binding`, `@import`, `@charset`, `<script`, `</`.
 - **Backslashes**, because a CSS escape (`\6a avascript:`) can spell a blocked keyword that no substring check sees.
 - Declaration breakout: `;`, `{`, `}`, and comment markers in any state.
-- `url(…)` pointing anywhere other than `http(s)://`, a relative path, or `data:image/…;base64`. An unparseable `url(` is refused outright.
-- Control characters, non-strings, and anything over 600 characters.
+- `url(…)` pointing anywhere other than `http(s)://`, a path starting with `/`, `./`, or `../`, or supported `data:image/…;base64`. An unparseable `url(` is refused outright.
+- Non-strings and anything over 600 characters. Control characters are removed before validation.
 
 Everything else passes through untouched, which is why `"10px 18px"`, `rgb(0 0 0 / 50%)`, `clamp(280px, 40vw, 420px)` and multi-layer shadows all work.
 
-Not covered: JSX you render into `message`, `description` or `icon` is yours to vouch for, and `bgColor` allows remote URLs by design.
+The raw `style` escape hatch does not pass through that guard; use it for trusted application CSS. Custom JSX is also application code, and `bgColor` allows remote URLs by design.
 
 ---
 
@@ -510,37 +634,71 @@ src/                    the library
   index.ts              public entry point, the only exported surface
   store.ts              the toast list, argument handling, promise tracking
   Toaster.tsx           subscribes, merges defaults, groups by position, portals
-  Toast.tsx             one card: motion, countdown, pause, progress bar
+  Toast.tsx             notch surface, motion, countdown, pause, progress bar
   placement.ts          position -> container geometry, stack and slide direction
   icons.tsx             built-in icons, consumer icon rendering
   css.ts                the security boundary
   useToast.ts           live list subscription
   types.ts              public types
+playground/             local interactive testing studio (Vite)
 tests/
   css.test.ts           the security boundary, value by value
   integration.test.tsx  rendering, placement, countdown, promises, lifecycle
+  notch.test.tsx        notch geometry, staged motion, holds, reduced motion
+  content.test.tsx      pills, custom icons, JSX, content resizing and spacing
+  border.test.tsx       outline widths, border styles and keyword measurement
+  release.test.tsx      wrapped icon references and replacement lifecycle
 ```
 
-Requires Node 22.12+ (a Vitest 5 requirement; the published package has no Node requirement of its own).
+Use Node **22.22.2+ on 22.x**, **24.15+ on 24.x**, or **26+** for the installed development tools. These requirements are separate from the published package's `engines.node: ">=18"` declaration.
 
 ```bash
-npm run typecheck   # tsc --noEmit, over src and tests
+npm run playground  # open http://127.0.0.1:5173
+npm run playground:build # validate the standalone playground build
+npm run typecheck   # tsc --noEmit, over src, tests and playground
 npm test            # vitest run
 npm run build       # tsup -> dist (esm + cjs + .d.ts)
+npm run prepublishOnly # typecheck, tests and library build
+npm pack --dry-run  # inspect the package file list without publishing
 ```
 
-Nine devDependencies, no runtime dependencies, `npm audit` clean. Two things not to trip over:
+The playground includes all toast types, nine positions, light/dark themes, text/pill/JSX content, custom icons, solid/gradient/custom CSS backgrounds, timing sliders, and an optional dismiss button. Use **Show toast** to apply content and timing changes; theme, position, and background update the preview. Edit `playground/TeamUpdate.tsx` to try your own JSX.
+
+No runtime dependencies. Vite is a development dependency for the local playground. Two things not to trip over:
 
 - Do not enable `treeshake` in [`tsup.config.ts`](tsup.config.ts) — it pipes the bundle through rollup, which strips the `"use client"` banner.
-- `overrides.esbuild` in `package.json` pins esbuild to `^0.28.2`. tsup 8.5.1 asks for `^0.27.0`, and every 0.27 release from 0.27.3 on carries [GHSA-g7r4-m6w7-qqqr](https://github.com/advisories/GHSA-g7r4-m6w7-qqqr). Drop the override once tsup widens its range.
+- `overrides.esbuild` in `package.json` selects `^0.28.2` for the build tooling. Review the toolchain and its lockfile together before changing this override.
 
 ---
 
-# Upgrading from 0.x
+# Upgrading to the notch design
+
+Existing `toast.success(message, icon?, config?)` calls and `<Toaster />` remain the public API. Review these changed defaults when upgrading:
+
+| Change | How to control it |
+|---|---|
+| The X button is now off by default | Set `closable: true` per toast, or `<Toaster closable />` globally |
+| A description opens in a notched panel; an omitted description renders a pill | Use `description` for text or JSX; the first argument stays the heading |
+| Width fits content instead of reserving a fixed panel width | Set `width` when your design needs a consistent size |
+| Panels use a 20px radius; pills are fully rounded | Set `radius` to override either layout |
+| Both themes use a thin border in the toast's accent color | Set `border` to use your own outline |
+| Opening and closing movement default to 500ms and 450ms | Set `motion.enter` and `motion.exit` |
+| A collapsed description toast holds its pill for two seconds before departure | Set `motion.exitHold`; `0` removes the hold |
+| Pill departure squeezes inward while fading | Set `motion.scale: 1` to disable the squeeze |
+
+For example, retain a visible X, fixed width, and no extra pill hold:
+
+```tsx
+<Toaster closable width={360} motion={{ exitHold: 0 }} />
+```
+
+The countdown still defaults to 4000ms, pauses on hover/focus, and supports `Infinity`. Custom icons, JSX descriptions, themes, gradients, positions, and explicit style overrides remain available.
+
+## Migrating from the provider-based API
 
 The provider pair is gone, and the option names are shorter.
 
-| 0.x | 1.0 |
+| Provider-based API | Current API |
 |---|---|
 | `<ToastProvider>…<ToastViewport /></ToastProvider>` | `<Toaster />` |
 | `defaultPosition` / `defaultDuration` / `defaultProgressBar` | `position` / `duration` / `progress` |
@@ -553,4 +711,4 @@ The provider pair is gone, and the option names are shorter.
 
 ---
 
-MIT — see [LICENSE](LICENSE). Demo and docs site: [ztoast.onrender.com](https://ztoast.onrender.com) (still showing the 0.x API).
+MIT — see [LICENSE](LICENSE). Hosted demo: [ztoast.onrender.com](https://ztoast.onrender.com). Use the local playground to try the code in this checkout.

@@ -3,6 +3,7 @@ node_modules/
 
 # production output
 dist/
+playground-dist/
 
 # logs
 npm-debug.log*

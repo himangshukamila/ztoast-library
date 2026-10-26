@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Children, useCallback, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { css, len, pick } from "./css";
 import { renderIcon } from "./icons";
@@ -30,33 +30,25 @@ interface Palette {
   bg: string;
   text: string;
   muted: string;
-  border: string;
-  shadow: string;
   track: string;
 }
 
 const THEMES: Record<"dark" | "light", Palette> = {
   dark: {
-    bg: "#17171a",
-    text: "#fafafa",
-    muted: "#a1a1aa",
-    border: "1px solid rgba(255, 255, 255, 0.09)",
-    shadow:
-      "0 18px 40px -12px rgba(0, 0, 0, 0.55), 0 4px 14px -6px rgba(0, 0, 0, 0.45)",
+    bg: "#141b21",
+    text: "#f1f5f9",
+    muted: "#a8b5c3",
     track: "rgba(255, 255, 255, 0.1)",
   },
   light: {
     bg: "#ffffff",
     text: "#18181b",
-    muted: "#71717a",
-    border: "1px solid rgba(9, 9, 11, 0.08)",
-    shadow:
-      "0 18px 40px -12px rgba(9, 9, 11, 0.18), 0 4px 14px -6px rgba(9, 9, 11, 0.1)",
+    muted: "#526171",
     track: "rgba(9, 9, 11, 0.08)",
   },
 };
 
-const ACCENTS: Record<ToastVariant, string> = {
+const DARK_ACCENTS: Record<ToastVariant, string> = {
   default: "#a1a1aa",
   success: "#34d399",
   error: "#fb7185",
@@ -65,9 +57,19 @@ const ACCENTS: Record<ToastVariant, string> = {
   loading: "#a1a1aa",
 };
 
+const LIGHT_ACCENTS: Record<ToastVariant, string> = {
+  default: "#526171",
+  success: "#047857",
+  error: "#be123c",
+  info: "#1d4ed8",
+  warning: "#a16207",
+  loading: "#526171",
+};
+
 interface ResolvedMotion {
   enter: number;
   exit: number;
+  exitHold: number;
   easing: string;
   exitEasing: string;
   slide: number;
@@ -76,43 +78,63 @@ interface ResolvedMotion {
 }
 
 const MOTION_DEFAULTS: ResolvedMotion = {
-  enter: 520,
-  exit: 340,
-  // a long, decelerating ease: the toast never appears to "pop" into place
-  easing: "cubic-bezier(0.16, 1, 0.3, 1)",
-  exitEasing: "cubic-bezier(0.4, 0, 0.2, 1)",
+  enter: 500,
+  exit: 450,
+  exitHold: 2000,
+  // Ease into and out of each stage, matching the silhouette's smoothstep.
+  easing: "cubic-bezier(0.33, 0, 0.67, 1)",
+  exitEasing: "cubic-bezier(0.33, 0, 0.67, 1)",
   slide: 22,
   scale: 0.94,
   blur: 2,
 };
 
-// the height collapse trails the fade out slightly, so the toast dissolves
-// first and the gap it leaves behind closes after it
-const COLLAPSE_DELAY_RATIO = 0.35;
-
-// how long the stack takes to open up a slot on enter, independent of the
-// card's own motion. the card does not wait for it - it is already in place -
-// so this only governs how quickly the toasts around it make room.
-const ROW_MS = 260;
-
-let reducedMotion: boolean | null = null;
-
 function prefersReducedMotion(): boolean {
-  if (reducedMotion !== null) return reducedMotion;
-  if (
-    typeof window === "undefined" ||
-    typeof window.matchMedia !== "function"
-  ) {
-    reducedMotion = false;
-    return reducedMotion;
+  return typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    : false;
+}
+
+// One continuous outline means gradients and images also flow through the
+// notch without seams. Dimensions come from layout, never transformed bounds.
+function outlinePath(width: number, height: number, headingWidth: number, headingHeight: number, radius: number, described: boolean, expansion: number, bottom: boolean, align: Placement["notchAlign"]): string {
+  const r = Math.max(0, Math.min(radius, width / (described ? 6 : 2), (height - (described ? headingHeight : 0)) / 2));
+  if (!described) {
+    return `M${r} 0 H${width-r} Q${width} 0 ${width} ${r} V${height-r} Q${width} ${height} ${width-r} ${height} H${r} Q0 ${height} 0 ${height-r} V${r} Q0 0 ${r} 0 Z`;
   }
-  try {
-    reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)")
-      .matches;
-  } catch {
-    reducedMotion = false;
-  }
-  return reducedMotion;
+  // Build side notches against the left edge, then reflect only the geometry
+  // for right placements. Text and background gradients remain upright.
+  const left = align === "center" ? (width - headingWidth) / 2 : 0;
+  const right = left + headingWidth;
+  const shoulder = Math.max(0, Math.min(14, width - right - r));
+  const cap = Math.max(0, Math.min(radius, headingHeight / 2, headingWidth / 2));
+  const point = (x: number, y: number, fullX = x, fullY = y) => {
+    const px = x + (fullX - x) * expansion;
+    const py = y + (fullY - y) * expansion;
+    return `${(align === "right" ? width - px : px).toFixed(3)} ${(bottom ? height - py : py).toFixed(3)}`;
+  };
+  // The flush side stays straight as its lower corner travels with the panel.
+  // Centered notches retain a shoulder on both sides.
+  const leftEdge = align === "center"
+    ? `Q${point(left+cap, headingHeight, 0, height)} ${point(left+cap, headingHeight, 0, height-r)}
+       L${point(left+cap, headingHeight, 0, headingHeight+r)}
+       Q${point(left+cap, headingHeight, 0, headingHeight)} ${point(left+cap, headingHeight, r, headingHeight)}
+       L${point(left+cap, headingHeight, left-shoulder, headingHeight)}
+       Q${point(left, headingHeight)} ${point(left, headingHeight-cap, left, headingHeight-shoulder)}`
+    : `Q${point(left, headingHeight, 0, height)} ${point(left, headingHeight-cap, 0, height-r)}`;
+  // Both endpoints have the same segments: a heading-sized capsule unfolds
+  // into the wider panel. Only coordinates move; stroke thickness stays 1px.
+  return `M${point(left+cap, 0)} L${point(right-cap, 0)}
+    Q${point(right, 0)} ${point(right, cap)}
+    L${point(right, headingHeight-cap, right, headingHeight-shoulder)}
+    Q${point(right, headingHeight)} ${point(right-cap, headingHeight, right+shoulder, headingHeight)}
+    L${point(right-cap, headingHeight, width-r, headingHeight)}
+    Q${point(right-cap, headingHeight, width, headingHeight)} ${point(right-cap, headingHeight, width, headingHeight+r)}
+    L${point(right-cap, headingHeight, width, height-r)}
+    Q${point(right-cap, headingHeight, width, height)} ${point(right-cap, headingHeight, width-r, height)}
+    L${point(left+cap, headingHeight, r, height)}
+    ${leftEdge}
+    L${point(left, cap)} Q${point(left, 0)} ${point(left+cap, 0)} Z`.replace(/\s+/g, " ");
 }
 
 function ms(value: number | undefined, fallback: number): number {
@@ -121,10 +143,11 @@ function ms(value: number | undefined, fallback: number): number {
     : fallback;
 }
 
-function resolveMotion(motion: ToastMotion | undefined): ResolvedMotion {
+function resolveMotion(motion: ToastMotion | undefined, reducedMotion: boolean): ResolvedMotion {
   const resolved: ResolvedMotion = {
     enter: ms(motion?.enter, MOTION_DEFAULTS.enter),
     exit: ms(motion?.exit, MOTION_DEFAULTS.exit),
+    exitHold: ms(motion?.exitHold, MOTION_DEFAULTS.exitHold),
     easing: css(motion?.easing) ?? MOTION_DEFAULTS.easing,
     exitEasing: css(motion?.exitEasing) ?? MOTION_DEFAULTS.exitEasing,
     slide: ms(motion?.slide, MOTION_DEFAULTS.slide),
@@ -136,8 +159,8 @@ function resolveMotion(motion: ToastMotion | undefined): ResolvedMotion {
   };
 
   // honour the os level motion preference: keep the lifecycle, drop the travel
-  if (prefersReducedMotion()) {
-    return { ...resolved, enter: 1, exit: 1, slide: 0, scale: 1, blur: 0 };
+  if (reducedMotion) {
+    return { ...resolved, enter: 1, exit: 1, exitHold: 0, slide: 0, scale: 1, blur: 0 };
   }
   return resolved;
 }
@@ -177,43 +200,105 @@ export interface ToastProps {
 export function Toast({ record, settings, placement }: ToastProps) {
   const { id, variant, createdAt, leaving } = record;
 
-  const motion = resolveMotion(settings.motion);
+  const [reducedMotion, setReducedMotion] = useState(prefersReducedMotion);
+  const motion = resolveMotion(settings.motion, reducedMotion);
+  const hasDescription = Children.toArray(settings.description).some(
+    (child) => typeof child !== "string" || child.trim().length > 0
+  );
+  const bottom = placement.notch === "bottom";
+  const notchAlign = placement.notchAlign;
+  const immediate = reducedMotion || motion.enter === 0;
+  const revealDelay = immediate ? 0 : motion.enter * 0.4;
+  const expandMs = immediate ? 0 : motion.enter - revealDelay;
+  const [expanded, setExpanded] = useState(!hasDescription || immediate);
+  const [exitReady, setExitReady] = useState(false);
+  const [exitCollapsed, setExitCollapsed] = useState(false);
+  const [exitDelay, setExitDelay] = useState(0);
+  const expansionRef = useRef(!hasDescription || immediate ? 1 : 0);
+  const collapseDurationRef = useRef(0);
+  const exitHoldRef = useRef(0);
+  const surfaceRef = useRef<HTMLDivElement>(null);
+  const outlineRef = useRef<SVGPathElement>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLDivElement>(null);
+  const [shape, setShape] = useState({ width: 360, height: 120, headingWidth: 240, headingHeight: 50, radius: hasDescription ? 20 : 9999 });
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(media.matches);
+    update();
+    media.addEventListener?.("change", update);
+    return () => media.removeEventListener?.("change", update);
+  }, []);
+
+  useEffect(() => {
+    const card = cardRef.current;
+    const heading = headingRef.current;
+    if (!card || !heading) return;
+    const measure = () => {
+      if (!card.offsetWidth || !card.offsetHeight) return;
+      const next = {
+        width: card.offsetWidth,
+        height: card.offsetHeight,
+        headingWidth: heading.offsetWidth,
+        headingHeight: heading.offsetHeight,
+        radius: Number.parseFloat(window.getComputedStyle(card).borderTopLeftRadius) || 0,
+      };
+      setShape((previous) => Object.keys(next).every((key) => previous[key as keyof typeof next] === next[key as keyof typeof next]) ? previous : next);
+    };
+    measure();
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : null;
+    observer?.observe(card);
+    observer?.observe(heading);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [record.message, settings.description, settings.width, settings.height, settings.padding, settings.font, settings.fontSize, settings.radius, settings.style]);
   const duration = normalizeDuration(settings.duration);
   const timed = Number.isFinite(duration) && duration > 0;
   const showProgress = settings.progress !== false && timed;
   const pauseEnabled = settings.pauseOnHover !== false && timed;
 
-  const [entered, setEntered] = useState(false);
+  const [entered, setEntered] = useState(immediate);
   const [settled, setSettled] = useState(false);
   const [paused, setPaused] = useState(false);
   const [remaining, setRemaining] = useState(duration);
   const [progress, setProgress] = useState(0);
   const [closeHovered, setCloseHovered] = useState(false);
+  const [closeFocused, setCloseFocused] = useState(false);
+  const hoveredRef = useRef(false);
+  const focusedRef = useRef(false);
 
   const startedAt = useRef(Date.now());
   // mirrors the state for the event handlers, which must not read stale values
   // and must never subtract the same elapsed slice twice
   const pausedRef = useRef(false);
-  const enteredRef = useRef(false);
+  const enteredRef = useRef(immediate);
 
-  const visible = entered && !leaving;
+  const visible = entered && (!leaving || !exitReady);
+  const bodyExpanded = (expanded || immediate) && !leaving;
   const running = entered && !paused && !leaving;
 
-  const phaseMs = visible ? motion.enter : motion.exit;
+  const notchEnterMs = hasDescription ? motion.enter * 0.4 : motion.enter;
+  const bodyExitMs = exitDelay || (leaving && !reducedMotion
+    ? Math.round(motion.exit * 0.5 * expansionRef.current)
+    : 0);
+  const notchExitMs = Math.max(0, motion.exit - exitDelay);
+  const phaseMs = visible ? notchEnterMs : notchExitMs;
   const phaseEase = visible ? motion.easing : motion.exitEasing;
-  const collapseDelay = leaving
-    ? Math.round(motion.exit * COLLAPSE_DELAY_RATIO)
-    : 0;
-
-  // the stack opens its slot faster than the card eases in. the exit is
-  // unchanged: there the row and the card move together.
-  const rowMs = visible ? Math.min(motion.enter, ROW_MS) : phaseMs;
+  // Make room while the notch arrives; scale this with the requested speed.
+  const rowMs = visible ? motion.enter * 0.5 : notchExitMs;
+  const bodyFadeMs = leaving ? bodyExitMs * 0.8 : expandMs * 0.6;
 
   // flip to the visible style one painted frame after mount, so the browser has
   // an initial state to transition away from. two frames, because a single one
   // is occasionally coalesced with the mounting paint.
   useEffect(() => {
-    if (typeof requestAnimationFrame !== "function") {
+    if (entered) return;
+    if (immediate || typeof requestAnimationFrame !== "function") {
       enteredRef.current = true;
       setEntered(true);
       return;
@@ -229,7 +314,80 @@ export function Toast({ record, settings, placement }: ToastProps) {
       cancelAnimationFrame(outer);
       if (inner) cancelAnimationFrame(inner);
     };
-  }, []);
+  }, [entered, immediate]);
+
+  // Finish the heading's arrival before opening the description panel.
+  useEffect(() => {
+    if (!entered || leaving || expanded) return;
+    if (!hasDescription || immediate) {
+      setExpanded(true);
+      return;
+    }
+    const timer = setTimeout(() => setExpanded(true), revealDelay);
+    return () => clearTimeout(timer);
+  }, [entered, leaving, expanded, hasDescription, immediate, revealDelay]);
+
+  // A dismissal reverses from the current shape, even halfway through entry.
+  // Hold the collapsed pill before its final fade and row close.
+  useEffect(() => {
+    if (!leaving) {
+      setExitReady(false);
+      setExitCollapsed(false);
+      setExitDelay(0);
+      exitHoldRef.current = 0;
+      return;
+    }
+    const delay = hasDescription && !reducedMotion
+      ? Math.round(motion.exit * 0.5 * expansionRef.current)
+      : 0;
+    collapseDurationRef.current = delay;
+    const hold = delay > 0 ? motion.exitHold : 0;
+    exitHoldRef.current = hold;
+    setExitDelay(delay);
+    setExitCollapsed(delay === 0);
+    if (delay === 0) {
+      setExitReady(true);
+      return;
+    }
+    const collapsedTimer = setTimeout(() => setExitCollapsed(true), delay);
+    const departureTimer = setTimeout(() => setExitReady(true), delay + hold);
+    return () => {
+      clearTimeout(collapsedTimer);
+      clearTimeout(departureTimer);
+    };
+  }, [leaving, hasDescription, reducedMotion, motion.exit, motion.exitHold]);
+
+  // Animate only two paint properties. No layout reads or React state updates
+  // occur per frame, and the background and outline always share one path.
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    const outline = outlineRef.current;
+    if (!surface || !outline) return;
+    const target = bodyExpanded ? 1 : 0;
+    const from = expansionRef.current;
+    const duration = leaving ? collapseDurationRef.current : expandMs;
+    const paint = (value: number) => {
+      expansionRef.current = value;
+      const next = outlinePath(shape.width, shape.height, shape.headingWidth, shape.headingHeight, shape.radius, hasDescription, value, bottom, notchAlign);
+      surface.style.clipPath = `path("${next}")`;
+      outline.setAttribute("d", next);
+    };
+    if (!hasDescription || reducedMotion || duration === 0 || from === target || typeof requestAnimationFrame !== "function") {
+      paint(target);
+      return;
+    }
+    const started = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const fraction = Math.min(1, Math.max(0, (now - started) / duration));
+      const eased = fraction * fraction * (3 - 2 * fraction);
+      paint(from + (target - from) * eased);
+      if (fraction < 1) frame = requestAnimationFrame(tick);
+    };
+    paint(from);
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [bodyExpanded, leaving, expandMs, hasDescription, reducedMotion, shape, bottom, notchAlign]);
 
   // once the card's own motion is over it no longer needs a compositing layer
   // or a filter. this waits for the card, not the row: dropping them early
@@ -245,8 +403,8 @@ export function Toast({ record, settings, placement }: ToastProps) {
   // unmounts mid-exit, and re-adding the same id cancels it.
   useEffect(() => {
     if (!leaving) return;
-    holdExit(id, motion.exit + collapseDelay);
-  }, [leaving, id, motion.exit, collapseDelay]);
+    holdExit(id, motion.exit + exitHoldRef.current);
+  }, [leaving, id, motion.exit, motion.exitHold, hasDescription, reducedMotion]);
 
   // a toast can be replaced in place (same id - toast.promise going from
   // loading to success). react keeps this component instance, so the countdown
@@ -254,11 +412,12 @@ export function Toast({ record, settings, placement }: ToastProps) {
   // time and, if that was Infinity, never dismisses.
   useEffect(() => {
     startedAt.current = Date.now();
-    pausedRef.current = false;
-    setPaused(false);
+    const interacting = pauseEnabled && (hoveredRef.current || focusedRef.current);
+    pausedRef.current = interacting;
+    setPaused(interacting);
     setRemaining(duration);
     setProgress(0);
-  }, [duration, createdAt]);
+  }, [duration, createdAt, pauseEnabled]);
 
   // auto dismiss, and resumption after a pause
   useEffect(() => {
@@ -308,75 +467,174 @@ export function Toast({ record, settings, placement }: ToastProps) {
     setPaused(false);
   }, []);
 
-  const palette = THEMES[settings.theme === "light" ? "light" : "dark"];
-  const accent = ACCENTS[variant] ?? ACCENTS.default;
+  const light = settings.theme === "light";
+  const palette = THEMES[light ? "light" : "dark"];
+  const accents = light ? LIGHT_ACCENTS : DARK_ACCENTS;
+  const accent = accents[variant] ?? accents.default;
+  const icon = renderIcon(settings.icon, variant, css(settings.iconColor) ?? accent, reducedMotion);
+  const background = settings.style?.background ?? settings.style?.backgroundColor ??
+    css(pick(settings.bgColor, settings.background)) ?? palette.bg;
+  const border = settings.style?.border ?? css(settings.border) ??
+    `1px solid ${accent}`;
+  const radius = settings.style?.borderRadius ?? len(settings.radius) ?? (hasDescription ? 20 : 9999);
+  const padding = settings.style?.padding ?? len(settings.padding);
+  // Preserve CSS lengths in SVG rather than interpreting e.g. 1em as 1px.
+  const parsedBorder = typeof document === "undefined" ? null : document.createElement("span").style;
+  if (parsedBorder) parsedBorder.border = String(border);
+  const borderColor = parsedBorder?.borderTopColor || "currentColor";
+  const borderStyle = parsedBorder?.borderTopStyle || "none";
+  const rawBorderWidth = parsedBorder?.borderTopWidth || "medium";
+  const widthKeyword = /^(thin|medium|thick)$/.test(rawBorderWidth) ? rawBorderWidth : null;
+  const [resolvedBorderWidth, setResolvedBorderWidth] = useState<{ keyword: string; width: number } | null>(null);
+
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!card || !widthKeyword || borderStyle === "none" || borderStyle === "hidden") return;
+    // CSS owns keyword widths. Resolve them once using the same browser,
+    // without adding a box to layout or doing any work on animation frames.
+    const probe = document.createElement("span");
+    probe.setAttribute("aria-hidden", "true");
+    probe.setAttribute("data-ztoast-border-probe", "");
+    Object.assign(probe.style, {
+      position: "absolute", visibility: "hidden", pointerEvents: "none",
+      width: "0", height: "0", borderStyle: "solid", borderWidth: widthKeyword,
+    });
+    card.appendChild(probe);
+    try {
+      const computedWidth = window.getComputedStyle(probe).borderTopWidth;
+      if (/^[\d.]+px$/.test(computedWidth)) {
+        const width = Number.parseFloat(computedWidth);
+        if (Number.isFinite(width)) setResolvedBorderWidth({ keyword: widthKeyword, width });
+      }
+    } finally {
+      probe.remove();
+    }
+  }, [widthKeyword, borderStyle]);
+
+  const borderWidth = borderStyle === "none" || borderStyle === "hidden" ? 0
+    : widthKeyword ? (resolvedBorderWidth?.keyword === widthKeyword ? resolvedBorderWidth.width : 0)
+      : /^[\d.]+px$/.test(rawBorderWidth) ? Number.parseFloat(rawBorderWidth) : rawBorderWidth;
+  const dashLength = typeof borderWidth === "number" ? borderWidth * 3 : `calc(${borderWidth} * 3)`;
+  const dashGap = typeof borderWidth === "number" ? borderWidth * 2 : `calc(${borderWidth} * 2)`;
+  const borderDashes = borderStyle === "dashed" ? `${dashLength} ${dashGap}`
+    : borderStyle === "dotted" ? `0 ${dashGap}` : undefined;
+  const path = outlinePath(shape.width, shape.height, shape.headingWidth, shape.headingHeight, shape.radius, hasDescription, expansionRef.current, bottom, notchAlign);
   const gap =
     typeof settings.gap === "number" && settings.gap >= 0
       ? settings.gap
       : DEFAULT_GAP;
 
   const width = len(settings.width);
+  const departing = leaving && exitReady;
+  const pillCenterX = !hasDescription || notchAlign === "center" ? shape.width / 2
+    : notchAlign === "left" ? shape.headingWidth / 2 : shape.width - shape.headingWidth / 2;
+  const pillCenterY = !hasDescription ? shape.height / 2
+    : bottom ? shape.height - shape.headingHeight / 2 : shape.headingHeight / 2;
+  const departureTransform = reducedMotion || motion.exit === 0 || motion.scale === 1
+    ? "none" : "scaleX(0) scaleY(0.8)";
 
-  // only the exit needs masking. on the way in the card already sits at its
-  // final spot and simply overflows the row that is still growing behind it,
-  // into the empty space the stack is about to occupy - so nothing has to clip,
-  // and the card carries its shadow from the very first frame.
-  //
-  // this matters because a clip box sized to the card slices the shadow off
-  // square on three sides: the default shadow reaches 8px past the left and
-  // right edges and 26px past the bottom one.
-  const clipped = leaving;
-
+  // The pill and its shadow fade together. Keep the row unmasked so it cannot
+  // crop the moving pill before its opacity transition finishes.
   const cardTransition = [
     `transform ${phaseMs}ms ${phaseEase}`,
-    `opacity ${Math.round(phaseMs * 0.75)}ms ${phaseEase}`,
+    `opacity ${visible ? Math.round(phaseMs * 0.75) : phaseMs}ms ${phaseEase}`,
     `filter ${phaseMs}ms ${phaseEase}`,
-    // the shadow only starts fading once the clip lifts, so its length follows
-    // the row rather than the card
-    `box-shadow ${Math.round(rowMs * 0.45)}ms ${phaseEase}`,
   ].join(", ");
 
   const cardStyle: CSSProperties = {
     position: "relative",
     boxSizing: "border-box",
     display: "flex",
-    alignItems: settings.description != null ? "flex-start" : "center",
-    gap: 12,
-    // an explicit width replaces the default range outright: css max-width
-    // wins over width regardless of order, so leaving the clamp in place would
-    // silently cap anything wider than 440px
-    minWidth: width ?? 240,
-    maxWidth: width ?? "min(92vw, 440px)",
-    width,
+    flexDirection: bottom ? "column-reverse" : "column",
+    minWidth: width,
+    maxWidth: width ?? "min(440px, calc(100vw - 32px))",
+    width: width ?? "fit-content",
     height: len(settings.height),
-    padding: len(settings.padding) ?? "13px 15px",
-    background: css(pick(settings.bgColor, settings.background)) ?? palette.bg,
+    minHeight: "min-content",
+    borderRadius: radius,
     color: css(pick(settings.textColor, settings.color)) ?? palette.text,
     fontFamily: css(settings.font) ?? SYSTEM_FONT,
     fontSize: len(settings.fontSize) ?? 14,
     lineHeight: 1.45,
     textAlign: "left",
-    borderRadius: len(settings.radius) ?? 14,
-    border: css(settings.border) ?? palette.border,
-    boxShadow: clipped ? "none" : (css(settings.shadow) ?? palette.shadow),
-    // keeps the progress bar inside the rounded corners
-    overflow: "hidden",
-    pointerEvents: "auto",
+    pointerEvents: leaving ? "none" : "auto",
     opacity: visible ? 1 : 0,
-    transform: visible
-      ? "none"
-      : hiddenTransform(placement.from, motion.slide, motion.scale),
-    filter: visible
-      ? settled
-        ? undefined
-        : "blur(0px)"
-      : motion.blur > 0
-        ? `blur(${motion.blur}px)`
-        : undefined,
+    transform: visible ? "none" : departing ? departureTransform : hiddenTransform(placement.from, motion.slide, motion.scale),
+    transformOrigin: departing ? `${pillCenterX}px ${pillCenterY}px` : `${notchAlign} ${bottom ? "bottom" : "top"}`,
+    filter: [
+      !settings.shadow && settings.style?.boxShadow === undefined ? (light
+        ? "drop-shadow(0 8px 14px rgba(15, 23, 42, 0.10))"
+        : "drop-shadow(0 12px 20px rgba(0, 0, 0, 0.32))") : "",
+      visible ? (settled ? "" : "blur(0px)") : motion.blur > 0 ? `blur(${motion.blur}px)` : "",
+    ].filter(Boolean).join(" ") || undefined,
     transition: cardTransition,
     willChange: settled && !leaving ? undefined : "transform, opacity, filter",
     ...settings.style,
+    // A single clipped background paints the full silhouette below the content.
+    background: "transparent",
+    border: 0,
+    padding: 0,
+    boxShadow: settings.style?.boxShadow ?? css(settings.shadow),
   };
+
+  const surfaceStyle: CSSProperties = {
+    boxSizing: "border-box",
+    background,
+    clipPath: `path("${path.replace(/\s+/g, " ")}")`,
+  };
+
+  const closeButton = settings.closable === true && (
+    <button
+      type="button"
+      onClick={() => dismiss(id)}
+      onMouseEnter={() => setCloseHovered(true)}
+      onMouseLeave={() => setCloseHovered(false)}
+      onFocus={() => setCloseFocused(true)}
+      onBlur={() => setCloseFocused(false)}
+      aria-label="Dismiss notification"
+      style={{
+        appearance: "none",
+        position: hasDescription ? "absolute" : "relative",
+        top: hasDescription && !bottom ? 8 : undefined,
+        bottom: hasDescription && bottom ? 8 : undefined,
+        right: hasDescription ? 8 : undefined,
+        background: closeHovered ? palette.track : "transparent",
+        border: 0,
+        margin: 0,
+        padding: 8,
+        width: 32,
+        height: 32,
+        borderRadius: 10,
+        color: palette.muted,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        outline: closeFocused ? `2px solid ${accent}` : undefined,
+        outlineOffset: 2,
+        transition: "background 160ms ease",
+      }}
+    >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+        strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+        <path d="M18 6 6 18M6 6l12 12" />
+      </svg>
+    </button>
+  );
+
+  const progressBar = showProgress && (
+    <div data-ztoast-progress="" aria-hidden="true" style={{
+      position: "absolute", left: 24, right: 24, top: bottom && hasDescription ? 0 : undefined, bottom: bottom && hasDescription ? undefined : 0, height: 2,
+      overflow: "hidden", borderRadius: 2, background: palette.track,
+    }}>
+      <div style={{
+        height: "100%", width: "100%", background: css(settings.progressColor) ?? accent,
+        transformOrigin: "left center", transform: `scaleX(${progress})`,
+        transition: running ? `transform ${Math.max(remaining, 0)}ms linear` : "none",
+      }} />
+    </div>
+  );
 
   return (
     <div
@@ -386,7 +644,7 @@ export function Toast({ record, settings, placement }: ToastProps) {
         // 0fr -> 1fr animates the row height without ever measuring the dom,
         // which is what makes the stack settle smoothly when one toast leaves
         gridTemplateRows: visible ? "1fr" : "0fr",
-        transition: `grid-template-rows ${rowMs}ms ${phaseEase} ${collapseDelay}ms`,
+        transition: `grid-template-rows ${rowMs}ms ${phaseEase} 0ms`,
       }}
     >
       <div
@@ -399,123 +657,103 @@ export function Toast({ record, settings, placement }: ToastProps) {
           display: "flex",
           alignItems:
             placement.direction === "up" ? "flex-end" : "flex-start",
-          overflow: clipped ? "hidden" : "visible",
+          overflow: "visible",
         }}
       >
         {/* the gap between toasts lives inside the collapsing box, so it
             disappears together with the toast instead of leaving a hole */}
         <div style={{ paddingTop: gap / 2, paddingBottom: gap / 2 }}>
           <div
+            ref={cardRef}
             data-ztoast=""
             data-variant={variant}
+            data-ztoast-notch={placement.notch}
+            data-ztoast-notch-align={notchAlign}
+            data-ztoast-expanded={bodyExpanded}
             role={variant === "error" ? "alert" : "status"}
             aria-live={variant === "error" ? "assertive" : "polite"}
             aria-atomic="true"
             style={cardStyle}
-            onMouseEnter={pause}
-            onMouseLeave={resume}
-            // keyboard users never fire mouse events: focusing the dismiss
-            // button has to pause too, or the toast vanishes mid tab
-            onFocus={pause}
-            onBlur={resume}
+            onMouseEnter={() => { hoveredRef.current = true; pause(); }}
+            onMouseLeave={() => {
+              hoveredRef.current = false;
+              if (!focusedRef.current) resume();
+            }}
+            onFocus={() => { focusedRef.current = true; pause(); }}
+            onBlur={(event) => {
+              if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return;
+              focusedRef.current = false;
+              if (!hoveredRef.current) resume();
+            }}
           >
-            {renderIcon(settings.icon, variant, css(settings.iconColor) ?? accent)}
-
-            <div
-              style={{
-                flex: 1,
-                minWidth: 0,
-                display: "flex",
-                flexDirection: "column",
-                gap: 3,
-              }}
-            >
-              <div
-                style={{
-                  fontWeight: settings.fontWeight ?? 600,
-                  wordBreak: "break-word",
-                }}
-              >
+            <div ref={surfaceRef} data-ztoast-surface="" aria-hidden="true" style={{
+              ...surfaceStyle, position: "absolute", inset: 0, pointerEvents: "none",
+            }} />
+            <svg aria-hidden="true" width="100%" height="100%" viewBox={`0 0 ${shape.width} ${shape.height}`}
+              preserveAspectRatio="none" style={{ position: "absolute", inset: 0, overflow: "visible", pointerEvents: "none" }}>
+              <path ref={outlineRef} d={path} fill="none" stroke={borderColor} strokeWidth={borderWidth}
+                strokeLinecap={borderStyle === "dotted" ? "round" : "butt"} style={{ strokeDasharray: borderDashes }} />
+            </svg>
+            {/* Reserve shoulder space intrinsically so short descriptions can
+                shrink the panel without forcing the heading onto extra lines. */}
+            <div data-ztoast-heading-wrap="" style={{
+              display: "flex",
+              boxSizing: "border-box",
+              width: "100%",
+              flexShrink: 0,
+              paddingLeft: !hasDescription || notchAlign === "left" ? 0 : notchAlign === "right" ? 48 : 24,
+              paddingRight: !hasDescription || notchAlign === "right" ? 0 : notchAlign === "left" ? 48 : 24,
+            }}>
+            <div ref={headingRef} data-ztoast-heading="" style={{
+              position: "relative",
+              alignSelf: notchAlign === "left" ? "flex-start" : notchAlign === "right" ? "flex-end" : "center",
+              marginLeft: notchAlign !== "left" ? "auto" : undefined,
+              marginRight: notchAlign !== "right" ? "auto" : undefined,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+              width: hasDescription ? "fit-content" : "100%",
+              maxWidth: "100%",
+              boxSizing: "border-box",
+              padding: padding ?? (hasDescription ? (bottom ? "10px 18px 12px" : "12px 18px 10px") : "10px 14px"),
+            }}>
+              {icon != null && <span data-ztoast-icon="" style={{
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                width: 28, height: 28, borderRadius: 10,
+                background: light ? "rgba(100, 116, 139, 0.08)" : "rgba(148, 163, 184, 0.08)",
+              }}>{icon}</span>}
+              <div style={{ minWidth: 0, fontWeight: settings.fontWeight ?? 600, overflowWrap: "anywhere" }}>
                 {record.message}
               </div>
-              {settings.description != null && (
-                <div
-                  style={{
-                    fontSize: "0.92em",
-                    fontWeight: 400,
-                    color: palette.muted,
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {settings.description}
-                </div>
-              )}
+              {!hasDescription && closeButton}
+              {!hasDescription && progressBar}
             </div>
-
-            {settings.closable !== false && (
-              <button
-                type="button"
-                onClick={() => dismiss(id)}
-                onMouseEnter={() => setCloseHovered(true)}
-                onMouseLeave={() => setCloseHovered(false)}
-                aria-label="Dismiss notification"
-                style={{
-                  appearance: "none",
-                  background: "transparent",
-                  border: "none",
-                  margin: 0,
-                  padding: 2,
-                  borderRadius: 6,
-                  color: "inherit",
-                  opacity: closeHovered ? 1 : 0.55,
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  flexShrink: 0,
-                  lineHeight: 0,
-                  transition: "opacity 180ms ease",
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M18 6 6 18M6 6l12 12" />
-                </svg>
-              </button>
-            )}
-
-            {showProgress && (
-              <div
-                data-ztoast-progress=""
-                style={{
-                  position: "absolute",
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  height: 3,
-                  background: palette.track,
-                }}
-              >
-                <div
-                  style={{
-                    height: "100%",
-                    width: "100%",
-                    background: css(settings.progressColor) ?? accent,
-                    transformOrigin: "left center",
-                    transform: `scaleX(${progress})`,
-                    transition: running
-                      ? `transform ${Math.max(remaining, 0)}ms linear`
-                      : "none",
-                  }}
-                />
+            </div>
+            {hasDescription && (
+              <div data-ztoast-body="" style={{
+                position: "relative",
+                boxSizing: "border-box",
+                flex: 1,
+                minWidth: 0,
+                width: "100%",
+                padding: padding ?? `${bottom ? 14 : 8}px ${settings.closable === true ? 44 : 12}px ${bottom ? 8 : 14}px 12px`,
+                opacity: bodyExpanded ? 1 : 0,
+                visibility: (expanded || immediate) && (!leaving || !exitCollapsed) ? "visible" : "hidden",
+                pointerEvents: bodyExpanded ? "auto" : "none",
+                transform: bodyExpanded ? "none" : `translateY(${bottom ? 8 : -8}px)`,
+                clipPath: bodyExpanded ? "inset(0 0 0 0)" : bottom ? "inset(100% 0 0 0)" : "inset(0 0 100% 0)",
+                transition: reducedMotion ? "none" : `opacity ${bodyFadeMs}ms ${leaving ? motion.exitEasing : motion.easing}, transform ${leaving ? bodyExitMs : expandMs}ms ${leaving ? motion.exitEasing : motion.easing}, clip-path ${leaving ? bodyExitMs : expandMs}ms ${leaving ? motion.exitEasing : motion.easing}`,
+                fontSize: "0.93em",
+                lineHeight: 1.5,
+                fontWeight: 400,
+                textAlign: "center",
+                color: css(pick(settings.textColor, settings.color)) ?? palette.muted,
+                overflowWrap: "anywhere",
+              }}>
+                {settings.description}
+                {closeButton}
+                {progressBar}
               </div>
             )}
           </div>

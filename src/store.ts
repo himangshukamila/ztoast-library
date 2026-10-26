@@ -1,5 +1,6 @@
 import { isValidElement } from "react";
 import type { ReactNode } from "react";
+import { isIconComponent } from "./icons";
 import type {
   PromiseMessages,
   ToastConfig,
@@ -105,7 +106,7 @@ export function drop(id: string | number): void {
 }
 
 function startLeaving(record: ToastRecord): void {
-  fireClose(record);
+  clearExitTimer(record.id);
   exitTimers.set(
     record.id,
     setTimeout(() => drop(record.id), EXIT_SAFETY_MS)
@@ -123,22 +124,27 @@ export function dismiss(id?: string | number): void {
   // already leaving: never start a second exit, and never fire onClose twice
   if (!record || record.leaving) return;
 
+  // Register the fallback before notifying subscribers: a mounted card can
+  // replace it with its exact animation timing, and onClose can safely reuse
+  // the id without a later fallback removing the replacement.
+  startLeaving(record);
   commit(
     records.map((item) => (item.id === id ? { ...item, leaving: true } : item))
   );
-  startLeaving(record);
+  fireClose(record);
 }
 
 export function dismissAll(): void {
   const leaving = records.filter((record) => !record.leaving);
   if (leaving.length === 0) return;
 
+  for (const record of leaving) startLeaving(record);
   commit(
     records.map((record) =>
       record.leaving ? record : { ...record, leaving: true }
     )
   );
-  for (const record of leaving) startLeaving(record);
+  for (const record of leaving) fireClose(record);
 }
 
 function add(
@@ -188,7 +194,7 @@ function add(
 function looksLikeIcon(value: unknown): boolean {
   if (value === null) return false;
   const type = typeof value;
-  if (type === "string" || type === "number" || type === "function") return true;
+  if (type === "string" || type === "number" || isIconComponent(value)) return true;
   if (type === "boolean") return true;
   if (Array.isArray(value)) return true;
   return isValidElement(value);
